@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Session {{ meta.session_id }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <p style="margin-bottom:0.5rem;"><a href="{{ url_for('dashboard.index') }}" style="color:var(--muted);text-decoration:none;">&#8592; Audit</a></p>
+  <h1>Session <span class="mono" style="font-size:1.1rem;">{{ meta.session_id }}</span></h1>
+  <p class="subtitle">Project: <strong>{{ meta.project }}</strong> &mdash; {{ meta.first_ts }} to {{ meta.last_ts }}</p>
+</div>
+
+<div class="cards" style="grid-template-columns: repeat(4, 1fr);">
+  <div class="card">
+    <div class="label">Turns</div>
+    <div class="value">{{ meta.total_calls }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Input Tokens</div>
+    <div class="value">{{ "{:,}".format(meta.total_input_tokens) }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Output Tokens</div>
+    <div class="value">{{ "{:,}".format(meta.total_output_tokens) }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Total Cost</div>
+    <div class="value">${{ "%.6f"|format(meta.total_cost) }}</div>
+  </div>
+</div>
+
+{% for c in calls %}
+<div class="turn-card{% if c.error %} turn-error{% endif %}">
+  <div class="turn-header">
+    <span class="turn-num">#{{ loop.index }}</span>
+    <span class="mono" style="color:var(--muted);font-size:0.8rem;">{{ c.ts }}</span>
+    <code>{{ c.model }}</code>
+    <span style="color:var(--muted);font-size:0.8rem;">{{ c.input_tokens or 0 }} in / {{ c.output_tokens or 0 }} out</span>
+    <span style="color:var(--muted);font-size:0.8rem;">${{ "%.6f"|format(c.cost_usd or 0) }}</span>
+    <span style="color:var(--muted);font-size:0.8rem;">{{ c.latency_ms or 0 }}ms</span>
+    {% if c.gov_flags and c.gov_flags != '[]' %}
+      {% for flag in c.gov_flags|fromjson %}
+        <span class="badge pii">{{ flag }}</span>
+      {% endfor %}
+    {% endif %}
+    {% if c.error %}
+      <span class="badge err" title="{{ c.error }}">error</span>
+    {% endif %}
+  </div>
+
+  {% if c.tool_calls and c.tool_calls != 'null' %}
+  {% set tools = c.tool_calls|fromjson %}
+  {% if tools %}
+  <div class="turn-section">
+    <div class="turn-label">Tool Calls ({{ tools|length }})</div>
+    <div class="tool-list">
+      {% for tc in tools %}
+      <details class="tool-item">
+        <summary class="tool-summary">
+          <span class="tool-name">{{ tc.name }}</span>
+          {% set inp = tc.input %}
+          {% if inp.file_path %}<span class="tool-arg">{{ inp.file_path }}</span>
+          {% elif inp.command %}<span class="tool-arg">{{ inp.command[:120] }}{% if inp.command|length > 120 %}...{% endif %}</span>
+          {% elif inp.url %}<span class="tool-arg">{{ inp.url }}</span>
+          {% elif inp.query %}<span class="tool-arg">{{ inp.query }}</span>
+          {% elif inp.prompt %}<span class="tool-arg">{{ inp.prompt[:120] }}{% if inp.prompt|length > 120 %}...{% endif %}</span>
+          {% endif %}
+        </summary>
+        <pre class="turn-pre" style="margin-top:0.4rem;font-size:0.75rem;">{{ tc.input | tojson(indent=2) }}</pre>
+      </details>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {% endif %}
+
+  {% if c.raw_response %}
+  <details class="turn-section" open>
+    <summary class="turn-label" style="cursor:pointer;">Response text</summary>
+    <pre class="turn-pre" style="margin-top:0.5rem;">{{ c.raw_response }}</pre>
+  </details>
+  {% endif %}
+
+  {% if c.raw_prompt %}
+  <details class="turn-section">
+    <summary class="turn-label" style="cursor:pointer;">Prompt (full history, {{ c.raw_prompt|length }} chars)</summary>
+    <pre class="turn-pre" style="margin-top:0.5rem;">{{ c.raw_prompt }}</pre>
+  </details>
+  {% endif %}
+
+  {% if not c.tool_calls and not c.raw_response and not c.raw_prompt %}
+  <div class="turn-section" style="color:var(--muted);font-size:0.85rem;">No content stored (AIGLUE_LOG_RAW=false)</div>
+  {% endif %}
+</div>
+{% else %}
+<p style="color:var(--muted);">No calls found for this session.</p>
+{% endfor %}
+
+<style>
+.turn-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+.turn-card.turn-error { border-color: rgba(239,68,68,0.4); }
+
+.turn-header {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0.6rem 1rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.turn-num {
+  font-weight: 700;
+  color: var(--blue);
+  font-size: 0.875rem;
+  min-width: 2rem;
+}
+
+.turn-section {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+}
+.turn-section:first-of-type { border-top: none; }
+
+.turn-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+}
+
+.turn-pre {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  line-height: 1.6;
+  max-height: 400px;
+  overflow-y: auto;
+  background: rgba(0,0,0,0.2);
+  border-radius: 4px;
+  padding: 0.75rem;
+}
+
+.tool-list { display: flex; flex-direction: column; gap: 0.3rem; }
+
+.tool-item { background: rgba(0,0,0,0.15); border-radius: 4px; overflow: hidden; }
+
+.tool-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.82rem;
+}
+.tool-summary::-webkit-details-marker { display: none; }
+.tool-summary::before { content: '▶'; font-size: 0.6rem; color: var(--muted); transition: transform 0.15s; }
+details[open] .tool-summary::before { transform: rotate(90deg); }
+
+.tool-name {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-weight: 600;
+  color: var(--blue);
+  font-size: 0.8rem;
+}
+.tool-arg {
+  color: var(--muted);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 600px;
+}
+
+.tool-item .turn-pre { border-radius: 0; margin: 0; }
+</style>
+{% endblock %}

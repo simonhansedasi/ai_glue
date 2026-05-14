@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ai_glue — {% block title %}Audit Dashboard{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <nav>
+    <div class="nav-brand">ai_glue</div>
+    <div class="nav-links">
+      <a href="{{ url_for('dashboard.index') }}">Audit</a>
+      <a href="{{ url_for('dashboard.executive') }}">Executive</a>
+      <a href="{{ url_for('dashboard.aggregate') }}">Aggregate</a>
+      <a href="{{ url_for('dashboard.export') }}">Export CSV</a>
+      <a href="{{ url_for('dashboard.stats') }}">API</a>
+    </div>
+  </nav>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

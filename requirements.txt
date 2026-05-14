@@ -1,0 +1,7 @@
+anthropic
+openai
+flask
+python-dotenv
+pyyaml
+requests
+pytest

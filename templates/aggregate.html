@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Aggregate View{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Aggregate View</h1>
+  <p class="subtitle">Merged across all child instances &mdash; {{ as_of }}</p>
+</div>
+
+{% if not results %}
+<div class="section">
+  <p style="color:var(--muted);">
+    No child instances configured. Add entries under <code>aggregator.children</code>
+    in <code>governance.yaml</code> to pull data from other ai_glue deployments.
+  </p>
+</div>
+{% else %}
+
+<!-- Merged totals -->
+<div class="cards" style="grid-template-columns: repeat(3, 1fr);">
+  <div class="card">
+    <div class="label">Total Calls</div>
+    <div class="value">{{ merged.total_calls }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Total Cost</div>
+    <div class="value">${{ "%.4f"|format(merged.total_cost) }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Total Sessions</div>
+    <div class="value">{{ merged.num_sessions }}</div>
+  </div>
+</div>
+
+<!-- Child instance status -->
+<div class="section">
+  <h3>Instances</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Source</th><th>Status</th><th>Calls</th><th>Sessions</th>
+        <th>Total Cost</th><th>Avg Latency</th><th>As Of</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+      <tr{% if r._error %} class="row-error"{% endif %}>
+        <td><strong>{{ r._source }}</strong></td>
+        <td>
+          {% if r._error %}
+            <span class="badge err">error</span>
+          {% else %}
+            <span class="badge ok">ok</span>
+          {% endif %}
+        </td>
+        <td>{{ (r.summary or {}).get('total_calls', 0) or 0 }}</td>
+        <td>{{ (r.summary or {}).get('num_sessions', 0) or 0 }}</td>
+        <td>${{ "%.4f"|format((r.summary or {}).get('total_cost', 0) or 0) }}</td>
+        <td>{{ (r.summary or {}).get('avg_latency', 0) or 0 }}ms</td>
+        <td class="mono">
+          {% if r._error %}
+            <span style="color:var(--red)">{{ r._error }}</span>
+          {% else %}
+            {{ r.get('as_of', '') }}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Merged by-project breakdown -->
+<div class="section">
+  <h3>By Project</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Source</th><th>Project</th><th>Calls</th><th>Sessions</th>
+        <th>Total Cost</th><th>Avg Latency</th><th>Top Model</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set ns = namespace(found=false) %}
+      {% for r in results %}
+        {% if not r._error %}
+          {% for p in r.by_project if p.project != 'claude-code' %}
+          {% set ns.found = true %}
+          <tr>
+            <td style="color:var(--muted);">{{ r._source }}</td>
+            <td>{{ p.project }}</td>
+            <td>{{ p.calls }}</td>
+            <td>{{ p.sessions }}</td>
+            <td>${{ "%.4f"|format(p.total_cost or 0) }}</td>
+            <td>{{ p.avg_latency or 0 }}ms</td>
+            <td><code>{{ p.top_model or '' }}</code></td>
+          </tr>
+          {% endfor %}
+        {% endif %}
+      {% endfor %}
+      {% if not ns.found %}
+      <tr><td colspan="7" class="empty">No project data available.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% endif %}
+{% endblock %}

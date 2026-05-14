@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}Executive View{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>AI Usage Overview</h1>
+  <p class="subtitle">As of {{ as_of }}</p>
+</div>
+
+<!-- Summary Cards -->
+<div class="cards">
+  <div class="card">
+    <div class="label">Total AI Spend</div>
+    <div class="value">${{ "%.2f"|format(summary.total_cost or 0) }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Projects Active</div>
+    <div class="value">{{ summary.num_projects or 0 }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Conversations</div>
+    <div class="value">{{ summary.num_sessions or 0 }}</div>
+  </div>
+  <div class="card {% if (gov.flagged_calls or 0) + (gov.blocked_calls or 0) > 0 %}card-warn{% endif %}">
+    <div class="label">Risk Flags</div>
+    <div class="value">{{ (gov.flagged_calls or 0) + (gov.blocked_calls or 0) }}</div>
+  </div>
+</div>
+
+<!-- Risk callout -->
+{% set total_flags = (gov.flagged_calls or 0) + (gov.blocked_calls or 0) %}
+{% if total_flags > 0 %}
+<div class="section">
+  <div class="risk-callout">
+    {% if gov.flagged_calls and gov.flagged_calls > 0 %}
+    <p>
+      <strong>{{ gov.flagged_calls }} request{{ 's' if gov.flagged_calls != 1 else '' }}</strong>
+      contained sensitive data patterns (email addresses, phone numbers, or SSNs).
+      Data was not blocked &mdash; flagged for review.
+    </p>
+    {% endif %}
+    {% if gov.blocked_calls and gov.blocked_calls > 0 %}
+    <p>
+      <strong>{{ gov.blocked_calls }} request{{ 's' if gov.blocked_calls != 1 else '' }}</strong>
+      were blocked by governance rules before reaching the AI provider.
+    </p>
+    {% endif %}
+    <div style="margin-top:0.75rem;display:flex;gap:1rem;align-items:center;">
+      <a href="{{ url_for('dashboard.index') }}?flagged=1" style="color:var(--blue);font-size:0.85rem;">View flagged calls &rarr;</a>
+      <button id="markReviewedBtn" onclick="markReviewed()" style="font-size:0.85rem;padding:0.3rem 0.8rem;background:transparent;border:1px solid var(--muted);color:var(--muted);border-radius:4px;cursor:pointer;">Mark all reviewed</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<script>
+function markReviewed() {
+  fetch("{{ url_for('dashboard.mark_reviewed') }}", {method: "POST"})
+    .then(() => location.reload());
+}
+</script>
+
+<!-- Charts -->
+<div class="charts-row">
+  <div class="chart-box">
+    <h3>Spend by Project</h3>
+    <canvas id="teamChart"></canvas>
+  </div>
+  <div class="chart-box">
+    <h3>Daily Spend (USD)</h3>
+    <canvas id="trendChart"></canvas>
+  </div>
+</div>
+
+<!-- Project breakdown table -->
+<div class="section">
+  <h3>Project Breakdown</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Project</th>
+        <th>AI Requests</th>
+        <th>Conversations</th>
+        <th>Total Spend</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in by_project if p.project != 'claude-code' %}
+      <tr>
+        <td><a href="{{ url_for('dashboard.index') }}?project={{ p.project }}" style="color:var(--blue);text-decoration:none;">{{ p.project }}</a></td>
+        <td>{{ p.calls }}</td>
+        <td>{{ p.sessions }}</td>
+        <td>${{ "%.2f"|format(p.total_cost or 0) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="empty">No usage logged yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+  const byProject = {{ by_project | selectattr('project', 'ne', 'claude-code') | list | tojson }};
+  const daily     = {{ daily | tojson }};
+
+  // Spend by Team — horizontal bar
+  new Chart(document.getElementById("teamChart"), {
+    type: "bar",
+    data: {
+      labels: byProject.map(p => p.project),
+      datasets: [{
+        data: byProject.map(p => p.total_cost || 0),
+        backgroundColor: "#2563eb",
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      indexAxis: "y",
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, ticks: { color: "#9ca3af", callback: v => "$" + v.toFixed(2) } },
+        y: { ticks: { color: "#9ca3af" } }
+      }
+    }
+  });
+
+  // Daily spend trend — line
+  new Chart(document.getElementById("trendChart"), {
+    type: "line",
+    data: {
+      labels: daily.map(d => d.day),
+      datasets: [{
+        data: daily.map(d => d.cost || 0),
+        borderColor: "#10b981",
+        backgroundColor: "rgba(16,185,129,0.1)",
+        fill: true,
+        tension: 0.3,
+        pointRadius: 3,
+      }]
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, ticks: { color: "#9ca3af", callback: v => "$" + v.toFixed(2) } },
+        x: { ticks: { color: "#9ca3af" } }
+      }
+    }
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}Audit Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  {% if filter_project %}
+  <h1>Project Report: {{ filter_project }}</h1>
+  <p class="subtitle">Audit log filtered to project <strong>{{ filter_project }}</strong> &mdash; <a href="{{ url_for('dashboard.index') }}" style="color:var(--blue);">clear filter</a></p>
+  {% else %}
+  <h1>LLM Audit Dashboard</h1>
+  <p class="subtitle">Every call. Every token. Every dollar.</p>
+  {% endif %}
+</div>
+
+<!-- Summary Cards -->
+<div class="cards">
+  <div class="card">
+    <div class="label">Total Calls</div>
+    <div class="value">{{ summary.total_calls or 0 }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Total Cost</div>
+    <div class="value">${{ "%.6f"|format(summary.total_cost or 0) }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Avg Latency</div>
+    <div class="value">{{ summary.avg_latency or 0 }}ms</div>
+  </div>
+  <div class="card">
+    <div class="label">Projects</div>
+    <div class="value">{{ summary.num_projects or 0 }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Sessions</div>
+    <div class="value">{{ summary.num_sessions or 0 }}</div>
+  </div>
+</div>
+
+<!-- Charts -->
+<div class="charts-row">
+  <div class="chart-box">
+    <h3>Calls per Day</h3>
+    <canvas id="callsChart"></canvas>
+  </div>
+  <div class="chart-box">
+    <h3>Cost per Day (USD)</h3>
+    <canvas id="costChart"></canvas>
+  </div>
+</div>
+
+<!-- By Model Breakdown -->
+<div class="section">
+  <h3>By Model</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Model</th><th>Calls</th><th>Total Cost</th><th>Avg Latency</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in by_model %}
+      <tr>
+        <td><code>{{ m.model }}</code></td>
+        <td>{{ m.calls }}</td>
+        <td>${{ "%.6f"|format(m.cost or 0) }}</td>
+        <td>{{ m.avg_latency or 0 }}ms</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="empty">No calls logged yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- By Project Breakdown -->
+<div class="section">
+  <h3>By Project</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Project</th><th>Calls</th><th>Sessions</th><th>Total Cost</th><th>Avg Latency</th><th>Top Model</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in by_project if p.project != 'claude-code' %}
+      <tr>
+        <td><a href="?project={{ p.project }}" style="color:var(--blue);text-decoration:none;">{{ p.project }}</a></td>
+        <td>{{ p.calls }}</td>
+        <td>{{ p.sessions }}</td>
+        <td>${{ "%.4f"|format(p.total_cost or 0) }}</td>
+        <td>{{ p.avg_latency or 0 }}ms</td>
+        <td><code>{{ p.top_model or '' }}</code></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="empty">No calls logged yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Recent Conversations -->
+<div class="section">
+  <div class="section-header">
+    <h3>Recent Conversations</h3>
+    <form class="filter-form" method="get">
+      <input type="text" name="project" placeholder="Filter by project"
+             value="{{ filter_project }}">
+      <button type="submit">Filter</button>
+      {% if filter_project %}
+        <a href="{{ url_for('dashboard.index') }}" class="clear-btn">Clear</a>
+      {% endif %}
+    </form>
+  </div>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Last Active</th>
+          <th>Project</th>
+          <th>Session</th>
+          <th>Turns</th>
+          <th>In Tokens</th>
+          <th>Out Tokens</th>
+          <th>Cost</th>
+          <th>Model</th>
+          <th>Instance</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in recent_sessions %}
+        <tr{% if s.is_trivial %} class="trivial-row" style="display:none;opacity:0.55;"{% endif %}>
+          <td class="mono" style="color:var(--muted);">{{ s.last_ts }}</td>
+          <td>{{ s.project }}</td>
+          <td class="mono"><a href="{{ url_for('dashboard.session_view', session_id=s.session_id) }}" style="color:var(--blue);text-decoration:none;">{{ s.session_id }}</a></td>
+          <td>{{ s.calls }}</td>
+          <td>{{ "{:,}".format(s.total_input) }}</td>
+          <td>{{ "{:,}".format(s.total_output) }}</td>
+          <td>${{ "%.4f"|format(s.total_cost) }}</td>
+          <td><code>{{ s.model }}</code></td>
+          <td style="color:var(--muted);font-size:0.8rem;">{{ s._source or '' }}</td>
+          <td>{% if s.has_flags %}<span class="badge pii">flags</span>{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="empty">No conversations logged yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div style="margin-top:0.6rem;display:flex;justify-content:space-between;align-items:center;">
+    {% if trivial_count > 0 %}
+    <button id="trivial-toggle" onclick="toggleTrivial()"
+            style="background:none;border:none;color:var(--muted);font-size:0.8rem;cursor:pointer;padding:0;">
+      Show {{ trivial_count }} init/mode-switch session{{ 's' if trivial_count != 1 else '' }}
+    </button>
+    {% else %}
+    <span></span>
+    {% endif %}
+    {% if recent_sessions|length == limit %}
+    <a href="?{% if filter_project %}project={{ filter_project }}&{% endif %}limit={{ limit * 2 }}"
+       style="color:var(--muted);font-size:0.85rem;text-decoration:none;">
+      Show more &darr;
+    </a>
+    {% endif %}
+  </div>
+  <script>
+    function toggleTrivial() {
+      const rows = document.querySelectorAll('.trivial-row');
+      const btn = document.getElementById('trivial-toggle');
+      const hidden = rows[0] && rows[0].style.display === 'none';
+      rows.forEach(r => r.style.display = hidden ? '' : 'none');
+      btn.textContent = hidden
+        ? 'Hide init/mode-switch sessions'
+        : 'Show {{ trivial_count }} init/mode-switch session{{ "s" if trivial_count != 1 else "" }}';
+    }
+  </script>
+</div>
+
+<script>
+  const daily = {{ daily | tojson }};
+  const labels = daily.map(d => d.day);
+
+  new Chart(document.getElementById("callsChart"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Calls",
+        data: daily.map(d => d.calls),
+        backgroundColor: "#2563eb",
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { color: "#9ca3af" } },
+                x: { ticks: { color: "#9ca3af" } } }
+    }
+  });
+
+  new Chart(document.getElementById("costChart"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Cost (USD)",
+        data: daily.map(d => d.cost),
+        backgroundColor: "#10b981",
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { color: "#9ca3af" } },
+                x: { ticks: { color: "#9ca3af" } } }
+    }
+  });
+</script>
+{% endblock %}

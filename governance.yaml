@@ -1,0 +1,63 @@
+# ai_glue governance rules
+# Edit this file to configure which models are allowed, PII detection, and per-project limits.
+
+# Only these models may be called. Comment out to disable the allowlist.
+model_allowlist:
+  - claude-sonnet-4-6
+  - claude-haiku-4-5
+  - claude-haiku-4-5-20251001
+  - gpt-4o
+  - gpt-4o-mini
+
+# Scan every prompt for email addresses, SSNs, phone numbers, and credit card numbers.
+# Violations are flagged in the audit log but do NOT block the call.
+pii_detection: true
+
+# Exact values that should never trigger a PII flag (e.g. your own email injected into
+# every system prompt). All matches of a given type must be allowlisted to suppress the flag.
+pii_allowlist:
+  - woses21@gmail.com
+
+# Per-project limits. Project name must match the `project` arg passed to GluedClient.
+projects:
+  default:
+    daily_cost_cap_usd: 10.00
+    rate_limit_per_hour: 200
+
+  hr-bot:
+    daily_cost_cap_usd: 5.00
+    rate_limit_per_hour: 100
+
+  legal-research:
+    daily_cost_cap_usd: 20.00
+    rate_limit_per_hour: 50
+
+  demo:
+    daily_cost_cap_usd: 1.00
+    rate_limit_per_hour: 50
+
+# Aggregator config — for the /aggregate view.
+# This instance will pull /api/summary from each child URL and display a merged view.
+# Set AIGLUE_INSTANCE_NAME env var to label this instance when it is someone else's child.
+aggregator:
+  children:
+    - name: rippleforge-prod
+      url: http://68.183.130.60:5010
+  # children:
+  #   - name: marketing
+  #     url: http://marketing-host:5010
+  #   - name: engineering
+  #     url: http://eng-host:5010
+
+# Per-team API keys for zero-cooperation client tagging.
+# Issue each team a key that starts with its prefix (e.g. sk-aiglue-eng-<random>).
+# The proxy detects the prefix, tags calls as project=<name>, and substitutes the
+# real server API key before forwarding. Teams need no code changes — one key swap.
+# To enforce spend caps for a team, add the team name to `projects:` above.
+teams:
+  sk-aiglue-marketing:
+    name: marketing
+  sk-aiglue-eng:
+    name: engineering
+  sk-aiglue-demo:
+    name: demo
