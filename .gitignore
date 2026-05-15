@@ -10,3 +10,5 @@ venv/
 *.egg-info/
 dist/
 .DS_Store
+audit_log.csv
+.ipynb_checkpoints/
