@@ -182,7 +182,7 @@ Set `AIGLUE_LOG_RAW=false` in `.env` to store only the hash when prompt content 
 ## Tests
 
 ```bash
-pytest tests/ -v
+pytest tests/ -v 
 ```
 
 23 tests. No API keys required. All LLM calls are mocked.
