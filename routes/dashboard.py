@@ -460,3 +460,102 @@ def export():
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=audit_log.csv"},
     )
+
+
+@bp.route("/export/training")
+def export_training():
+    """Export logged conversations as JSONL for fine-tuning or content mining.
+
+    Query params:
+      project=X          filter by project
+      model=X            filter by model
+      since=YYYY-MM-DD   only include calls on or after this date
+      exclude_flagged=true  drop calls with governance flags
+      format=session     one JSONL line per full session (default: one line per turn)
+    """
+    project = request.args.get("project")
+    model_filter = request.args.get("model")
+    since = request.args.get("since")
+    exclude_flagged = request.args.get("exclude_flagged", "false").lower() == "true"
+    fmt = request.args.get("format", "turn")
+
+    filters = ["raw_prompt IS NOT NULL", "raw_response IS NOT NULL",
+               "raw_response != ''", "error IS NULL"]
+    params = []
+    if project:
+        filters.append("project = ?")
+        params.append(project)
+    if model_filter:
+        filters.append("model = ?")
+        params.append(model_filter)
+    if since:
+        filters.append("date(ts) >= ?")
+        params.append(since)
+    if exclude_flagged:
+        filters.append("(gov_flags = '[]' OR gov_flags IS NULL)")
+
+    where = "WHERE " + " AND ".join(filters)
+    with get_conn() as conn:
+        rows = conn.execute(f"""
+            SELECT session_id, project, model, provider,
+                   datetime(ts, '-7 hours') AS ts,
+                   raw_prompt, raw_response
+            FROM llm_calls {where}
+            ORDER BY session_id, ts ASC
+        """, params).fetchall()
+    rows = [dict(r) for r in rows]
+
+    out = io.StringIO()
+
+    if fmt == "session":
+        current_session = None
+        current_turns = []
+        current_meta = {}
+
+        def _flush_session(sid, turns, meta):
+            if not turns:
+                return
+            messages = []
+            for t in turns:
+                # raw_prompt = all prior turns joined with " | "; last segment is the new user message
+                segments = t["raw_prompt"].split(" | ")
+                user_text = segments[-1]
+                messages.append({"role": "user", "content": user_text})
+                messages.append({"role": "assistant", "content": t["raw_response"]})
+            out.write(json.dumps({
+                "session_id": sid,
+                "project": meta.get("project", ""),
+                "model": turns[-1]["model"],
+                "messages": messages,
+            }) + "\n")
+
+        for row in rows:
+            sid = row["session_id"]
+            if sid != current_session:
+                _flush_session(current_session, current_turns, current_meta)
+                current_session = sid
+                current_turns = []
+                current_meta = {"project": row["project"]}
+            current_turns.append(row)
+        _flush_session(current_session, current_turns, current_meta)
+
+    else:
+        for row in rows:
+            segments = row["raw_prompt"].split(" | ")
+            user_text = segments[-1]
+            out.write(json.dumps({
+                "prompt": user_text,
+                "completion": row["raw_response"],
+                "model": row["model"],
+                "provider": row["provider"],
+                "session_id": row["session_id"],
+                "project": row["project"],
+                "ts": row["ts"],
+            }) + "\n")
+
+    filename = f"training_{fmt}.jsonl"
+    return Response(
+        out.getvalue(),
+        mimetype="application/x-ndjson",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

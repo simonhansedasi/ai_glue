@@ -353,3 +353,76 @@ def test_parse_anthropic_stream():
     assert inp == 10
     assert out == 4
     assert tool_calls == []
+
+
+# ── Training export ───────────────────────────────────────────────────────────
+
+def _seed_conversation(session_id, project="test-project", model="claude-sonnet-4-6"):
+    """Insert a 3-turn conversation directly into the DB."""
+    turns = [
+        ("What is Python?", "A programming language."),
+        ("What is Python? | A programming language. | Tell me more.", "It was created by Guido."),
+        ("What is Python? | A programming language. | Tell me more. | It was created by Guido. | When?", "In 1991."),
+    ]
+    with get_conn() as conn:
+        for prompt, response in turns:
+            conn.execute("""
+                INSERT INTO llm_calls
+                    (provider, model, session_id, project, input_tokens, output_tokens,
+                     cost_usd, latency_ms, prompt_hash, raw_prompt, raw_response, gov_flags)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, ("anthropic", model, session_id, project, 10, 5, 0.001, 200, "abc",
+                  prompt, response, "[]"))
+        conn.commit()
+
+
+def test_training_export_turn_format(client):
+    _seed_conversation("training-turn-session")
+    resp = client.get("/export/training?project=test-project")
+    assert resp.status_code == 200
+    lines = [l for l in resp.data.decode().strip().splitlines() if l]
+    assert len(lines) == 3
+    records = [json.loads(l) for l in lines]
+    assert records[0]["prompt"] == "What is Python?"
+    assert records[0]["completion"] == "A programming language."
+    assert records[1]["prompt"] == "Tell me more."
+    assert records[2]["prompt"] == "When?"
+    assert all("session_id" in r and "model" in r and "project" in r for r in records)
+
+
+def test_training_export_session_format(client):
+    _seed_conversation("training-session-session", project="session-proj")
+    resp = client.get("/export/training?project=session-proj&format=session")
+    assert resp.status_code == 200
+    lines = [l for l in resp.data.decode().strip().splitlines() if l]
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["session_id"] == "training-session-session"
+    messages = record["messages"]
+    assert len(messages) == 6  # 3 user + 3 assistant
+    assert messages[0] == {"role": "user", "content": "What is Python?"}
+    assert messages[1] == {"role": "assistant", "content": "A programming language."}
+    assert messages[4] == {"role": "user", "content": "When?"}
+    assert messages[5] == {"role": "assistant", "content": "In 1991."}
+
+
+def test_training_export_since_filter(client):
+    _seed_conversation("training-since-session", project="since-proj")
+    resp = client.get("/export/training?project=since-proj&since=2099-01-01")
+    assert resp.status_code == 200
+    assert resp.data.decode().strip() == ""
+
+
+def test_training_export_excludes_flagged(client):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO llm_calls
+                (provider, model, session_id, project, input_tokens, output_tokens,
+                 cost_usd, latency_ms, prompt_hash, raw_prompt, raw_response, gov_flags)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, ("anthropic", "claude-sonnet-4-6", "flagged-session", "flagged-proj",
+              10, 5, 0.001, 200, "xyz", "Secret prompt", "Some response", '["pii:email"]'))
+        conn.commit()
+    resp = client.get("/export/training?project=flagged-proj&exclude_flagged=true")
+    assert resp.status_code == 200
+    assert resp.data.decode().strip() == ""
