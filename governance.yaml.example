@@ -1,5 +1,5 @@
 # ai_glue governance rules
-# Edit this file to configure which models are allowed, PII detection, and per-project limits.
+# Copy this file to governance.yaml and edit to match your environment.
 
 # Only these models may be called. Comment out to disable the allowlist.
 model_allowlist:
@@ -16,7 +16,7 @@ pii_detection: true
 # Exact values that should never trigger a PII flag (e.g. your own email injected into
 # every system prompt). All matches of a given type must be allowlisted to suppress the flag.
 pii_allowlist:
-  - woses21@gmail.com
+  # - admin@yourcompany.com
 
 # Per-project limits. Project name must match the `project` arg passed to GluedClient.
 projects:
@@ -40,9 +40,7 @@ projects:
 # This instance will pull /api/summary from each child URL and display a merged view.
 # Set AIGLUE_INSTANCE_NAME env var to label this instance when it is someone else's child.
 aggregator:
-  children:
-    - name: rippleforge-prod
-      url: http://68.183.130.60:5010
+  children: []
   # children:
   #   - name: marketing
   #     url: http://marketing-host:5010
