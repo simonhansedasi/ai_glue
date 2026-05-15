@@ -41,7 +41,7 @@ def check(provider, model, project, session_id, prompt):
 
     # PII detection — flags but does not block
     if config.get("pii_detection", True):
-        pii_allowlist = set(config.get("pii_allowlist", []))
+        pii_allowlist = set(config.get("pii_allowlist") or [])
         for pattern, label in _PII_PATTERNS:
             matches = pattern.findall(prompt)
             if matches and any(m not in pii_allowlist for m in matches):
