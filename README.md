@@ -18,7 +18,21 @@ Drop-in AI observability and governance for OpenAI and Anthropic applications.
 
 ai_glue does not replace your AI stack. It has no opinion on prompts, agents, RAG pipelines, or orchestration. It sits between your applications and model providers to add governance, auditing, spend visibility, and policy enforcement. Think of it as a transparent proxy with a dashboard — not a framework.
 
-## Quickstart
+## Deployment models
+
+**Evaluating / self-hosted** — you are both the operator and the user. Clone it, add your own API key to `.env`, run it on your machine. The quickstart below covers this case.
+
+**Team deployment** — IT deploys one ai_glue instance on a shared server with the organization's API key in `.env`. Individual developers never touch an API key. They change one environment variable on their machine and everything is logged, governed, and visible on the shared dashboard.
+
+```
+                       ┌─────────────────────────────────────┐
+dev laptop             │  ai_glue server                      │
+ANTHROPIC_BASE_URL ───►│  .env: ANTHROPIC_API_KEY=sk-org-...  │──► Anthropic API
+                       │  dashboard: http://ai-glue.internal  │
+                       └─────────────────────────────────────┘
+```
+
+## Quickstart (local / evaluation)
 
 ```bash
 git clone https://github.com/simonhansedasi/ai_glue.git
@@ -197,8 +211,8 @@ pytest tests/ -v
 
 | Variable | Default | Description |
 |---|---|---|
-| ANTHROPIC_API_KEY | — | Required for Anthropic calls (GluedClient mode) |
-| OPENAI_API_KEY | — | Required for OpenAI calls (GluedClient mode) |
+| ANTHROPIC_API_KEY | — | API key used by the server to forward calls. In team deployments, only the server's `.env` needs this — individual developers do not. |
+| OPENAI_API_KEY | — | Same as above for OpenAI. |
 | AIGLUE_DB | audit.db | Path to SQLite audit database |
 | AIGLUE_LOG_RAW | true | Store full prompt/response text |
 | AIGLUE_DEFAULT_PROJECT | proxy | Project label for untagged proxy calls |

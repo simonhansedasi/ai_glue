@@ -122,6 +122,45 @@ def _session_calls(session_id):
     return [dict(r) for r in rows]
 
 
+def _project_data(project):
+    with get_conn() as conn:
+        summary = dict(conn.execute("""
+            SELECT COUNT(*) AS calls,
+                   COUNT(DISTINCT session_id) AS sessions,
+                   ROUND(SUM(cost_usd), 6) AS total_cost,
+                   ROUND(AVG(latency_ms), 0) AS avg_latency,
+                   (SELECT model FROM llm_calls WHERE project = ?
+                    GROUP BY model ORDER BY COUNT(*) DESC LIMIT 1) AS top_model
+            FROM llm_calls WHERE project = ?
+        """, (project, project)).fetchone())
+        by_model = [dict(r) for r in conn.execute("""
+            SELECT model, COUNT(*) AS calls, ROUND(SUM(cost_usd), 6) AS cost
+            FROM llm_calls WHERE project = ?
+            GROUP BY model ORDER BY calls DESC
+        """, (project,)).fetchall()]
+        sessions = [dict(r) for r in conn.execute("""
+            SELECT session_id,
+                   COUNT(*) AS calls,
+                   SUM(input_tokens) AS total_input,
+                   SUM(output_tokens) AS total_output,
+                   ROUND(SUM(cost_usd), 6) AS total_cost,
+                   MIN(datetime(ts, '-7 hours')) AS first_ts,
+                   MAX(datetime(ts, '-7 hours')) AS last_ts,
+                   MAX(CASE WHEN gov_flags != '[]' AND gov_flags IS NOT NULL THEN 1 ELSE 0 END) AS has_flags
+            FROM llm_calls WHERE project = ?
+            GROUP BY session_id ORDER BY last_ts DESC
+        """, (project,)).fetchall()]
+    return summary, by_model, sessions
+
+
+@bp.route("/project/<name>")
+def project_view(name):
+    summary, by_model, sessions = _project_data(name)
+    if not summary or not summary.get("calls"):
+        return "Project not found", 404
+    return render_template("project.html", project=name, summary=summary, by_model=by_model, sessions=sessions)
+
+
 @bp.route("/session/<session_id>")
 def session_view(session_id):
     calls = _session_calls(session_id)

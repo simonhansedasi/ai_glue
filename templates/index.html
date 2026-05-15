@@ -84,7 +84,7 @@
     <tbody>
       {% for p in by_project if p.project != 'claude-code' %}
       <tr>
-        <td><a href="?project={{ p.project }}" style="color:var(--blue);text-decoration:none;">{{ p.project }}</a></td>
+        <td><a href="{{ url_for('dashboard.project_view', name=p.project) }}" style="color:var(--blue);text-decoration:none;">{{ p.project }}</a></td>
         <td>{{ p.calls }}</td>
         <td>{{ p.sessions }}</td>
         <td>${{ "%.4f"|format(p.total_cost or 0) }}</td>

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Project {{ project }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <p style="margin-bottom:0.5rem;"><a href="{{ url_for('dashboard.index') }}" style="color:var(--muted);text-decoration:none;">&#8592; Audit</a></p>
+  <h1>Project: <strong>{{ project }}</strong></h1>
+  <p class="subtitle">{{ summary.sessions }} session{{ 's' if summary.sessions != 1 else '' }} &mdash; top model: <code>{{ summary.top_model or 'none' }}</code></p>
+</div>
+
+<div class="cards" style="grid-template-columns: repeat(4, 1fr);">
+  <div class="card">
+    <div class="label">Total Calls</div>
+    <div class="value">{{ summary.calls }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Total Cost</div>
+    <div class="value">${{ "%.4f"|format(summary.total_cost or 0) }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Sessions</div>
+    <div class="value">{{ summary.sessions }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Avg Latency</div>
+    <div class="value">{{ summary.avg_latency or 0 }}ms</div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Sessions</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Session</th><th>Calls</th><th>Input Tokens</th><th>Output Tokens</th><th>Cost</th><th>Last Active</th><th>Flags</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in sessions %}
+      <tr>
+        <td class="mono"><a href="{{ url_for('dashboard.session_view', session_id=s.session_id) }}" style="color:var(--blue);text-decoration:none;">{{ s.session_id }}</a></td>
+        <td>{{ s.calls }}</td>
+        <td>{{ "{:,}".format(s.total_input or 0) }}</td>
+        <td>{{ "{:,}".format(s.total_output or 0) }}</td>
+        <td>${{ "%.6f"|format(s.total_cost or 0) }}</td>
+        <td>{{ s.last_ts }}</td>
+        <td>{% if s.has_flags %}<span class="badge pii">flagged</span>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="empty">No sessions found.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if by_model %}
+<div class="section">
+  <h3>By Model</h3>
+  <table>
+    <thead>
+      <tr><th>Model</th><th>Calls</th><th>Cost</th></tr>
+    </thead>
+    <tbody>
+      {% for m in by_model %}
+      <tr>
+        <td><code>{{ m.model }}</code></td>
+        <td>{{ m.calls }}</td>
+        <td>${{ "%.4f"|format(m.cost or 0) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
