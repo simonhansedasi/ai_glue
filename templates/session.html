@@ -28,7 +28,7 @@
 </div>
 
 {% for c in calls %}
-<div class="turn-card{% if c.error %} turn-error{% endif %}">
+<div class="turn-card{% if c.gov_flags and c.gov_flags != '[]' %} turn-flagged{% endif %}{% if c.error %} turn-error{% endif %}">
   <div class="turn-header">
     <span class="turn-num">#{{ loop.index }}</span>
     <span class="mono" style="color:var(--muted);font-size:0.8rem;">{{ c.ts }}</span>
@@ -80,9 +80,9 @@
   {% endif %}
 
   {% if c.raw_prompt %}
-  <details class="turn-section">
+  <details class="turn-section"{% if c.gov_flags and c.gov_flags != '[]' %} open{% endif %}>
     <summary class="turn-label" style="cursor:pointer;">Prompt (full history, {{ c.raw_prompt|length }} chars)</summary>
-    <pre class="turn-pre" style="margin-top:0.5rem;">{{ c.raw_prompt }}</pre>
+    <pre class="turn-pre prompt-pre" style="margin-top:0.5rem;">{{ c.raw_prompt }}</pre>
   </details>
   {% endif %}
 
@@ -102,7 +102,10 @@
   margin-bottom: 1rem;
   overflow: hidden;
 }
-.turn-card.turn-error { border-color: rgba(239,68,68,0.4); }
+.turn-card.turn-error   { border-color: rgba(239,68,68,0.4); }
+.turn-card.turn-flagged { border-color: rgba(234,179,8,0.5); }
+.turn-card.turn-flagged .turn-header { background: rgba(234,179,8,0.05); }
+.pii-hit { background: rgba(234,179,8,0.25); color: #fbbf24; border-radius: 2px; padding: 0 2px; font-weight: 600; }
 
 .turn-header {
   display: flex;
@@ -184,4 +187,30 @@ details[open] .tool-summary::before { transform: rotate(90deg); }
 
 .tool-item .turn-pre { border-radius: 0; margin: 0; }
 </style>
+
+<script>
+(function () {
+  const PII_PATTERNS = [
+    /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g,
+    /\b\d{3}-\d{2}-\d{4}\b/g,
+    /\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
+    /\b4[0-9]{12}(?:[0-9]{3})?\b/g,
+  ];
+
+  function escapeHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function highlightPII(pre) {
+    let text = escapeHtml(pre.textContent);
+    for (const pat of PII_PATTERNS) {
+      text = text.replace(new RegExp(pat.source, 'g'),
+        m => `<mark class="pii-hit">${m}</mark>`);
+    }
+    pre.innerHTML = text;
+  }
+
+  document.querySelectorAll('.turn-flagged .prompt-pre').forEach(highlightPII);
+})();
+</script>
 {% endblock %}
