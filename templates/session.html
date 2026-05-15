@@ -4,8 +4,14 @@
 {% block content %}
 <div class="page-header">
   <p style="margin-bottom:0.5rem;"><a href="{{ url_for('dashboard.index') }}" style="color:var(--muted);text-decoration:none;">&#8592; Audit</a></p>
-  <h1>Session <span class="mono" style="font-size:1.1rem;">{{ meta.session_id }}</span></h1>
-  <p class="subtitle">Project: <strong>{{ meta.project }}</strong> &mdash; {{ meta.first_ts }} to {{ meta.last_ts }}</p>
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+    <div>
+      <h1>Session <span class="mono" style="font-size:1.1rem;">{{ meta.session_id }}</span></h1>
+      <p class="subtitle">Project: <strong>{{ meta.project }}</strong> &mdash; {{ meta.first_ts }} to {{ meta.last_ts }}</p>
+    </div>
+    <a href="{{ url_for('dashboard.export_training') }}?format=session&session={{ meta.session_id }}"
+       class="export-btn">&#8595; Export JSONL</a>
+  </div>
 </div>
 
 <div class="cards" style="grid-template-columns: repeat(4, 1fr);">

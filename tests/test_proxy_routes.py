@@ -358,7 +358,10 @@ def test_parse_anthropic_stream():
 # ── Training export ───────────────────────────────────────────────────────────
 
 def _seed_conversation(session_id, project="test-project", model="claude-sonnet-4-6"):
-    """Insert a 3-turn conversation directly into the DB."""
+    """Insert a 3-turn conversation directly into the DB (idempotent)."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM llm_calls WHERE session_id = ?", (session_id,))
+        conn.commit()
     turns = [
         ("What is Python?", "A programming language."),
         ("What is Python? | A programming language. | Tell me more.", "It was created by Guido."),

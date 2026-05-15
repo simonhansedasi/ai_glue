@@ -4,8 +4,14 @@
 {% block content %}
 <div class="page-header">
   <p style="margin-bottom:0.5rem;"><a href="{{ url_for('dashboard.index') }}" style="color:var(--muted);text-decoration:none;">&#8592; Audit</a></p>
-  <h1>Project: <strong>{{ project }}</strong></h1>
-  <p class="subtitle">{{ summary.sessions }} session{{ 's' if summary.sessions != 1 else '' }} &mdash; top model: <code>{{ summary.top_model or 'none' }}</code></p>
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+    <div>
+      <h1>Project: <strong>{{ project }}</strong></h1>
+      <p class="subtitle">{{ summary.sessions }} session{{ 's' if summary.sessions != 1 else '' }} &mdash; top model: <code>{{ summary.top_model or 'none' }}</code></p>
+    </div>
+    <a href="{{ url_for('dashboard.export_training') }}?format=session&project={{ project }}"
+       class="export-btn">&#8595; Export all conversations</a>
+  </div>
 </div>
 
 <div class="cards" style="grid-template-columns: repeat(4, 1fr);">
@@ -32,7 +38,7 @@
   <table>
     <thead>
       <tr>
-        <th>Session</th><th>Calls</th><th>Input Tokens</th><th>Output Tokens</th><th>Cost</th><th>Last Active</th><th>Flags</th>
+        <th>Session</th><th>Calls</th><th>Input Tokens</th><th>Output Tokens</th><th>Cost</th><th>Last Active</th><th>Flags</th><th></th>
       </tr>
     </thead>
     <tbody>
@@ -45,6 +51,7 @@
         <td>${{ "%.6f"|format(s.total_cost or 0) }}</td>
         <td>{{ s.last_ts }}</td>
         <td>{% if s.has_flags %}<span class="badge pii">flagged</span>{% endif %}</td>
+        <td><a href="{{ url_for('dashboard.export_training') }}?format=session&session={{ s.session_id }}" style="color:var(--muted);font-size:0.8rem;text-decoration:none;" title="Export JSONL">&#8595; JSONL</a></td>
       </tr>
       {% else %}
       <tr><td colspan="7" class="empty">No sessions found.</td></tr>

@@ -474,6 +474,7 @@ def export_training():
       format=session     one JSONL line per full session (default: one line per turn)
     """
     project = request.args.get("project")
+    session_filter = request.args.get("session")
     model_filter = request.args.get("model")
     since = request.args.get("since")
     exclude_flagged = request.args.get("exclude_flagged", "false").lower() == "true"
@@ -485,6 +486,9 @@ def export_training():
     if project:
         filters.append("project = ?")
         params.append(project)
+    if session_filter:
+        filters.append("session_id = ?")
+        params.append(session_filter)
     if model_filter:
         filters.append("model = ?")
         params.append(model_filter)

@@ -198,3 +198,18 @@ code {
   line-height: 1.7;
 }
 .risk-callout p + p { margin-top: 0.5rem; }
+
+.export-btn {
+  display: inline-block;
+  padding: 0.35rem 0.85rem;
+  background: rgba(37,99,235,0.12);
+  border: 1px solid rgba(37,99,235,0.35);
+  border-radius: 6px;
+  color: var(--blue);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  margin-top: 0.25rem;
+}
+.export-btn:hover { background: rgba(37,99,235,0.22); }

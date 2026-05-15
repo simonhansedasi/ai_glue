@@ -193,13 +193,79 @@ Add spend caps or rate limits per team by adding the team name to `projects:` in
 
 Set `AIGLUE_LOG_RAW=false` in `.env` to store only the hash when prompt content is sensitive. Restrict filesystem permissions on `audit.db` in production — it contains call metadata and optionally raw prompts.
 
+## Training data export
+
+ai_glue logs every prompt and response, which means your audit database doubles as a conversation dataset. The `/export/training` endpoint turns logged conversations into JSONL you can use for fine-tuning, content mining, or building provider-independent capability baselines.
+
+This is particularly useful when a model you depend on is deprecated or sunsetted — if your conversations were logged through ai_glue, you have the raw material to fine-tune a replacement rather than starting from scratch.
+
+### Export a single conversation
+
+On any session page (`/session/<id>`), click **Export JSONL** to download that conversation as a single-session JSONL record.
+
+Via URL directly:
+```
+/export/training?format=session&session=<session_id>
+```
+
+### Export all conversations for a project
+
+On any project page (`/project/<name>`), click **Export all conversations** to download every session for that project.
+
+Via URL:
+```
+/export/training?format=session&project=<project_name>
+```
+
+### Output formats
+
+**`format=session`** — one JSONL line per full conversation, with alternating user/assistant turns. Compatible with most fine-tuning pipelines.
+
+```json
+{
+  "session_id": "conv-a3f9b2",
+  "project": "support-bot",
+  "model": "claude-sonnet-4-6",
+  "messages": [
+    {"role": "user", "content": "How do I reset my password?"},
+    {"role": "assistant", "content": "You can reset your password by..."},
+    {"role": "user", "content": "I don't see that option."},
+    {"role": "assistant", "content": "Try navigating to..."}
+  ]
+}
+```
+
+**`format=turn`** (default) — one JSONL line per API call, as isolated prompt/completion pairs. Useful for token-level analysis or simpler fine-tuning setups.
+
+```json
+{"prompt": "How do I reset my password?", "completion": "You can reset your password by...", "model": "claude-sonnet-4-6", "session_id": "conv-a3f9b2", "project": "support-bot", "ts": "2026-05-15 10:00:00"}
+```
+
+### Filters
+
+All filters can be combined:
+
+| Param | Example | Effect |
+|---|---|---|
+| `project` | `?project=hr-bot` | Only conversations from this project |
+| `session` | `?session=conv-abc` | Only this session |
+| `model` | `?model=gpt-4o` | Only calls made to this model |
+| `since` | `?since=2026-01-01` | Only calls on or after this date |
+| `exclude_flagged` | `?exclude_flagged=true` | Drop calls with PII or governance flags |
+
+### Notes
+
+- Calls are only exportable if `AIGLUE_LOG_RAW=true` (the default). Rows logged with `AIGLUE_LOG_RAW=false` are excluded from training exports.
+- The export queries the local instance's database only. Cross-instance export requires fetching from each child directly.
+- The user message for each turn is extracted from the end of the stored prompt string — the format is stable for standard single-user, single-assistant conversations.
+
 ## Tests
 
 ```bash
 pytest tests/ -v 
 ```
 
-23 tests. No API keys required. All LLM calls are mocked.
+27 tests. No API keys required. All LLM calls are mocked.
 
 ## Stack
 
