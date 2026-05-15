@@ -1,48 +1,60 @@
 # ai_glue
 
-A lightweight Python library that wraps LLM provider clients, logs every call to a local audit database, enforces governance rules, and surfaces everything in a multi-view dashboard.
+Drop-in AI observability and governance for OpenAI and Anthropic applications.
 
-**The problem**: Companies adopt AI tools fast and without oversight. No audit trail, no cost visibility, no PII controls, no cross-environment picture.
+![ai_glue audit dashboard](docs/screenshot-audit.png)
 
-**What this does**: Drop `GluedClient` into any existing app — or point existing apps at the proxy. Every call gets logged — provider, model, tokens, cost, latency, session, project. Deploy one instance per environment; the parent instance aggregates all children into a single unified view.
+## What ai_glue gives you
+
+- Every AI call logged — provider, model, tokens, cost, latency, project, session
+- Spend visibility by project, team, and environment
+- PII detection with per-call flag review workflow
+- Hard governance rules — block unapproved models, enforce cost caps and rate limits
+- Multi-instance aggregation — dev, staging, and prod in one unified dashboard
+- Role-split views: engineering audit log, executive spend summary, per-instance breakdown
+- Add governance to existing apps with **one environment variable change** — no code rewrites
+
+## What ai_glue is not
+
+ai_glue does not replace your AI stack. It has no opinion on prompts, agents, RAG pipelines, or orchestration. It sits between your applications and model providers to add governance, auditing, spend visibility, and policy enforcement. Think of it as a transparent proxy with a dashboard — not a framework.
 
 ## Quickstart
 
 ```bash
+git clone https://github.com/simonhansedasi/ai_glue.git
 cd ai_glue
 pip install -r requirements.txt
-cp .env.example .env       # add your API keys
-python examples/governance_demo.py   # no keys needed — shows governance in action
-python examples/anthropic_example.py
-python app.py              # visit http://localhost:5010
+cp .env.example .env              # add your API keys
+cp governance.yaml.example governance.yaml
+python examples/governance_demo.py   # no API keys needed
+python app.py                     # http://localhost:5010
 ```
 
-## Two modes
+## Two integration modes
 
-### Mode 1 — Proxy (zero code changes in existing apps)
+### Mode 1 — Proxy (zero code changes)
 
-Point existing apps at ai_glue instead of the real provider. One env var change per app:
+Point existing apps at ai_glue instead of the real provider. One environment variable per app:
 
 ```bash
-# Anthropic apps
+# Anthropic
 ANTHROPIC_BASE_URL=http://your-host:5010/proxy/anthropic
 
-# OpenAI apps
+# OpenAI
 OPENAI_BASE_URL=http://your-host:5010/proxy/openai/v1
 ```
 
-Tag calls with optional headers for project/session labeling:
+Every call is intercepted, logged, and governance-checked. The app receives the real response unchanged. Streaming is fully supported — the proxy passes the stream through and captures token counts and latency at the end.
+
+Tag calls with optional headers for project and session labeling:
 ```
 X-Aiglue-Project: hr-bot
 X-Aiglue-Session: user-123
 ```
 
-Every call is intercepted, logged, and governance-checked. The app receives the real response unchanged.
+If no headers are present, calls fall back to `AIGLUE_DEFAULT_PROJECT` / `AIGLUE_DEFAULT_SESSION` from `.env`.
 
-If no headers are present, calls are labeled with `AIGLUE_DEFAULT_PROJECT` and `AIGLUE_DEFAULT_SESSION`
-from the server's `.env` (defaults to `"proxy"`).
-
-### Mode 2 — Wrapper (new apps, or when you control the code)
+### Mode 2 — Wrapper (new apps or when you control the code)
 
 ```python
 from src import GluedClient
@@ -64,60 +76,76 @@ response = client.chat.completions.create(
 )
 ```
 
-## Governance rules
+## Governance
 
-Edit `governance.yaml` to configure:
+Edit `governance.yaml` to configure rules. Changes apply immediately — no restart needed.
 
-- **model_allowlist** — hard-blocks calls to unapproved models (returns 403)
-- **pii_detection** — flags prompts containing emails, SSNs, phone numbers, credit cards
-- **pii_allowlist** — exact strings that should never trigger a PII flag (e.g. your own email in every system prompt)
-- **daily_cost_cap_usd** — hard-blocks a project once its daily spend hits the cap
-- **rate_limit_per_hour** — hard-blocks a session that exceeds call frequency
+```yaml
+model_allowlist:          # hard-block calls to unapproved models (403)
+  - claude-sonnet-4-6
+  - gpt-4o
 
-Hard-blocking governance violations are never logged (the call was never made). PII flags are logged as warnings and do not block calls.
+pii_detection: true       # flag prompts containing emails, SSNs, phones, credit cards
 
-## Dashboard — three views
+pii_allowlist:            # exact strings that should never trigger a PII flag
+  - admin@yourcompany.com
+
+projects:
+  hr-bot:
+    daily_cost_cap_usd: 5.00     # hard-block once daily spend hits cap
+    rate_limit_per_hour: 100     # hard-block sessions that exceed call frequency
+```
+
+PII detection is regex-based (not ML). Hard-blocking violations are never logged — the call was never made. PII flags are logged as warnings and do not block calls.
+
+**Security note**: `governance.yaml` becomes a sensitive file if you use the team API key mapping feature (see below), since it maps key prefixes to real project names. Treat it like `.env` in production — restrict filesystem permissions and do not commit it. `governance.yaml` is gitignored by default for this reason.
+
+## Dashboard
 
 All three views draw from the same unified dataset merged across all instances.
 
 ### `/` — Audit (engineers / team leads)
 
-Full technical log. Every call from every instance in one table with an Instance column. Summary cards (total calls, cost, avg latency, projects, sessions) and charts (calls/day, cost/day) are also merged. Filters: project, session, or flagged-only. `?project=X` activates a "Project Report: X" header — useful as a shareable per-project artifact.
+Full call log. Every call from every instance in one table. Summary cards, daily charts, and by-project/by-model breakdowns are all merged across instances. Per-session drilldown shows individual turns, tool calls, and highlights flagged PII inline. Filters: `?project=X`, `?session=X`, `?flagged=1`.
 
 ### `/executive` — Executive view (leadership)
 
-Non-technical. No session IDs, no model names, no raw call table. Cards: Total AI Spend, Projects Active, Conversations, Risk Flags. Charts: Spend by Project (ranked horizontal bar), Daily Spend trend. If unreviewed PII flags or governance blocks exist, a risk callout appears with:
-- "View flagged calls →" — links to the audit log filtered to flagged calls
-- "Mark all reviewed" — acknowledges and clears the warning
+Non-technical. No session IDs, no model names. Cards: Total AI Spend, Projects Active, Conversations, Risk Flags. Charts: Spend by Project, Daily Spend trend. Unreviewed PII flags and governance blocks surface as a risk callout with a "Mark all reviewed" action.
 
-Risk Flags count only shows **unreviewed** flags.
+![ai_glue executive view](docs/screenshot-executive.png)
 
 ### `/aggregate` — Per-instance breakdown
 
-One panel per instance showing its individual summary, by-project table, and by-model table. Useful for comparing environment-level activity (e.g. dev vs prod). Merged top-line totals shown at the top.
+One panel per instance with its individual summary, by-project table, and by-model table. Useful for comparing dev vs. staging vs. prod activity side by side.
+
+![ai_glue aggregate view](docs/screenshot-aggregate.png)
 
 ## Multi-instance aggregation
 
-Run one ai_glue instance per environment. Each instance exposes `/api/summary`. A parent instance pulls from child URLs configured in `governance.yaml` and merges the data into a single unified view.
+Run one ai_glue instance per environment. A parent instance pulls `/api/summary` from each child and merges everything into a single unified view.
 
 ```
-Instance A (claude-code) ──┐
-Instance B (rippleforge)───┴──► Parent instance ──► unified /, /executive, /aggregate
+Dev instance    ──┐
+Staging instance ─┼──► Parent instance ──► unified /, /executive, /aggregate
+Prod instance   ──┘
 ```
 
-To add a child — edit `governance.yaml` on the parent, no code changes:
+To add a child — edit `governance.yaml` on the parent only, no code changes:
+
 ```yaml
 aggregator:
   children:
-    - name: rippleforge-prod
-      url: http://68.183.130.60:5010
+    - name: prod
+      url: http://prod-host:5010
+    - name: staging
+      url: http://staging-host:5010
 ```
 
 Set `AIGLUE_INSTANCE_NAME` on each child so it appears with a meaningful label in parent views.
 
 ## Per-team API key mapping
 
-Issue each team a fake key starting with its prefix in `governance.yaml`'s `teams:` section. Teams swap their API key for this one — zero other changes needed. The proxy detects the prefix, tags calls with the team's project name, and substitutes the real API key before forwarding.
+Issue each team a synthetic key with a recognizable prefix. Teams swap their real provider key for it — no other changes needed. The proxy detects the prefix, tags all calls with the team's project name, and substitutes the real API key before forwarding. This enables centralized billing, per-team spend attribution, and chargeback models without distributing raw provider keys.
 
 ```yaml
 teams:
@@ -127,34 +155,29 @@ teams:
     name: marketing
 ```
 
+Add spend caps or rate limits per team by adding the team name to `projects:` in `governance.yaml`.
+
 ## What gets logged
 
 | Field | Description |
 |---|---|
-| ts | UTC timestamp (displayed as PDT in dashboard) |
+| ts | UTC timestamp |
 | provider | anthropic / openai |
 | model | exact model string |
-| session_id | caller-supplied or auto-detected or AIGLUE_DEFAULT_SESSION |
-| project | caller-supplied or auto-detected or AIGLUE_DEFAULT_PROJECT |
+| session_id | caller-supplied, auto-detected, or default |
+| project | caller-supplied, auto-detected, or default |
 | input_tokens | from API response |
 | output_tokens | from API response |
-| cost_usd | estimated from token counts (6 decimal places) |
+| cost_usd | estimated from token counts |
 | latency_ms | wall time |
-| prompt_hash | MD5 of prompt (first 16 chars) |
+| prompt_hash | MD5 of prompt |
 | raw_prompt | full text (if AIGLUE_LOG_RAW=true) |
 | raw_response | full text (if AIGLUE_LOG_RAW=true) |
-| gov_flags | JSON list of warnings triggered |
+| gov_flags | JSON array of warning strings |
 | error | exception message if call failed |
-| reviewed_at | timestamp when flags were acknowledged via "Mark all reviewed" |
+| reviewed_at | timestamp when flags were acknowledged |
 
-Set `AIGLUE_LOG_RAW=false` in `.env` to store only the hash when prompts themselves are sensitive.
-
-## Auto-detection (Claude Code / proxy mode)
-
-When running as a proxy for Claude Code, project and session can be inferred automatically — no headers needed:
-
-- **Project**: scanned from `tool_use` file paths in the conversation (e.g. `/coding/rippleforge/` → `rippleforge`). Falls back to `AIGLUE_DEFAULT_PROJECT`.
-- **Session**: MD5 hash of the first user message, prefixed `conv-`. Groups all turns of a conversation under the same session ID even though each API call is independent.
+Set `AIGLUE_LOG_RAW=false` in `.env` to store only the hash when prompt content is sensitive. Restrict filesystem permissions on `audit.db` in production — it contains call metadata and optionally raw prompts.
 
 ## Tests
 
@@ -166,8 +189,8 @@ pytest tests/ -v
 
 ## Stack
 
-- Python, Flask, SQLite
-- Chart.js (CDN)
+- Python 3.7+, Flask, SQLite
+- Chart.js (CDN, no build step)
 - Anthropic SDK, OpenAI SDK
 
 ## Environment variables
@@ -181,3 +204,7 @@ pytest tests/ -v
 | AIGLUE_DEFAULT_PROJECT | proxy | Project label for untagged proxy calls |
 | AIGLUE_DEFAULT_SESSION | proxy | Session label for untagged proxy calls |
 | AIGLUE_INSTANCE_NAME | (AIGLUE_DEFAULT_PROJECT) | Label shown in parent aggregator views |
+
+## License
+
+MIT
