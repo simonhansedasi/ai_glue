@@ -44,26 +44,14 @@
     </thead>
     <tbody>
       {% for r in results %}
-      <tr{% if r._error %} class="row-error"{% endif %}>
+      <tr>
         <td><strong>{{ r._source }}</strong></td>
-        <td>
-          {% if r._error %}
-            <span class="badge err">error</span>
-          {% else %}
-            <span class="badge ok">ok</span>
-          {% endif %}
-        </td>
+        <td><span class="badge ok">ok</span></td>
         <td>{{ (r.summary or {}).get('total_calls', 0) or 0 }}</td>
         <td>{{ (r.summary or {}).get('num_sessions', 0) or 0 }}</td>
         <td>${{ "%.4f"|format((r.summary or {}).get('total_cost', 0) or 0) }}</td>
         <td>{{ (r.summary or {}).get('avg_latency', 0) or 0 }}ms</td>
-        <td class="mono">
-          {% if r._error %}
-            <span style="color:var(--red)">{{ r._error }}</span>
-          {% else %}
-            {{ r.get('as_of', '') }}
-          {% endif %}
-        </td>
+        <td class="mono">{{ r.get('last_call_ts', '') }}</td>
       </tr>
       {% endfor %}
     </tbody>

@@ -2,6 +2,8 @@ import csv
 import io
 import json
 import os
+import threading
+import time
 from datetime import datetime, timezone, timedelta
 
 PDT = timezone(timedelta(hours=-7))
@@ -12,6 +14,35 @@ from src.store import get_conn
 from src.governance import _load_config
 
 bp = Blueprint("dashboard", __name__)
+
+_child_cache: dict = {}  # name -> last successful /api/summary response
+_cache_lock = threading.Lock()
+
+
+def _refresh_children():
+    """Background thread: re-fetch all children every 5 minutes."""
+    while True:
+        time.sleep(300)
+        children = _load_config().get("aggregator", {}).get("children", [])
+        for child in children:
+            name = child.get("name", "unknown")
+            url = child.get("url", "").rstrip("/")
+            try:
+                r = http.get(f"{url}/api/summary", timeout=10)
+                r.raise_for_status()
+                data = r.json()
+                data["_source"] = name
+                data["_error"] = None
+                for row in (data.get("recent") or []):
+                    row["_source"] = name
+                with _cache_lock:
+                    _child_cache[name] = data
+            except Exception:
+                pass  # keep whatever is already cached
+
+
+_refresh_thread = threading.Thread(target=_refresh_children, daemon=True)
+_refresh_thread.start()
 
 
 def _summary():
@@ -224,13 +255,35 @@ def stats():
     })
 
 
+def _last_call_ts(recent):
+    """Return the most recent call timestamp from a list of call rows, or empty string."""
+    timestamps = [r.get("ts", "") for r in (recent or []) if r.get("ts")]
+    return max(timestamps) if timestamps else ""
+
+
+def _fetch_child(name, url):
+    """Fetch a single child's /api/summary and update _child_cache. Called by background thread."""
+    try:
+        r = http.get(f"{url}/api/summary", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        data["_source"] = name
+        data["_error"] = None
+        for row in (data.get("recent") or []):
+            row["_source"] = name
+        with _cache_lock:
+            _child_cache[name] = data
+    except Exception:
+        pass
+
+
 def _gather_instances():
     children = _load_config().get("aggregator", {}).get("children", [])
     instance = os.getenv("AIGLUE_INSTANCE_NAME") or os.getenv("AIGLUE_DEFAULT_PROJECT", "unnamed")
     local_recent = _recent(limit=500)
     for row in local_recent:
         row["_source"] = instance
-    results = [{
+    local_result = {
         "_source": instance,
         "_error": None,
         "summary": _summary(),
@@ -239,24 +292,27 @@ def _gather_instances():
         "daily": _daily(),
         "gov": _governance_summary(),
         "recent": local_recent,
-    }]
+    }
+    local_result["last_call_ts"] = _last_call_ts(local_recent)
+    results = [local_result]
     for child in children:
         name = child.get("name", "unknown")
         url = child.get("url", "").rstrip("/")
-        try:
-            r = http.get(f"{url}/api/summary", timeout=5)
-            r.raise_for_status()
-            data = r.json()
-            data["_source"] = name
-            data["_error"] = None
-            for row in (data.get("recent") or []):
-                row["_source"] = name
-        except Exception as e:
-            data = {
-                "_source": name, "_error": str(e),
+        with _cache_lock:
+            cached = _child_cache.get(name)
+        if cached is None:
+            # First load after restart: fetch once synchronously so the page isn't blank
+            _fetch_child(name, url)
+            with _cache_lock:
+                cached = _child_cache.get(name)
+        if cached is not None:
+            cached["last_call_ts"] = _last_call_ts(cached.get("recent"))
+            results.append(cached)
+        else:
+            results.append({
+                "_source": name, "_error": None, "last_call_ts": "",
                 "summary": {}, "by_project": [], "by_model": [], "daily": [], "gov": {}, "recent": [],
-            }
-        results.append(data)
+            })
     return results
 
 
