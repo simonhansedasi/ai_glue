@@ -241,6 +241,17 @@ def mark_reviewed():
                OR error LIKE '%governance%'
         """)
         conn.commit()
+    children = _load_config().get("aggregator", {}).get("children", [])
+    for child in children:
+        name = child.get("name", "unknown")
+        url = child.get("url", "").rstrip("/")
+        try:
+            http.post(f"{url}/flags/mark-reviewed", timeout=5)
+        except Exception:
+            pass
+        with _cache_lock:
+            if name in _child_cache:
+                _child_cache[name]["gov"] = {"flagged_calls": 0, "blocked_calls": 0}
     return ("", 204)
 
 
