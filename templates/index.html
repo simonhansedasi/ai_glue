@@ -132,7 +132,8 @@
         <tr{% if s.is_trivial %} class="trivial-row" style="display:none;opacity:0.55;"{% endif %}>
           <td class="mono" style="color:var(--muted);">{{ s.last_ts }}</td>
           <td>{{ s.project }}</td>
-          <td class="mono"><a href="{{ url_for('dashboard.session_view', session_id=s.session_id) }}" style="color:var(--blue);text-decoration:none;">{{ s.session_id }}</a></td>
+          {% set _src_url = instance_urls.get(s._source, '') %}
+          <td class="mono"><a href="{{ (_src_url + '/session/' + s.session_id) if _src_url else url_for('dashboard.session_view', session_id=s.session_id) }}" style="color:var(--blue);text-decoration:none;">{{ s.session_id }}</a></td>
           <td>{{ s.calls }}</td>
           <td>{{ "{:,}".format(s.total_input) }}</td>
           <td>{{ "{:,}".format(s.total_output) }}</td>

@@ -219,6 +219,7 @@ def index():
         limit = 20
     results = _gather_instances()
     sessions, trivial_count = _merge_recent_sessions(results, project=project, limit=limit)
+    instance_urls = {r["_source"]: r.get("_url", "") for r in results}
     return render_template("index.html",
         summary=_merge_summary(results, project=project),
         recent_sessions=sessions,
@@ -228,6 +229,7 @@ def index():
         by_project=_merge_by_project(results),
         filter_project=project or "",
         limit=limit,
+        instance_urls=instance_urls,
     )
 
 
@@ -296,6 +298,7 @@ def _gather_instances():
         row["_source"] = instance
     local_result = {
         "_source": instance,
+        "_url": "",
         "_error": None,
         "summary": _summary(),
         "by_project": _by_project(),
@@ -318,10 +321,11 @@ def _gather_instances():
                 cached = _child_cache.get(name)
         if cached is not None:
             cached["last_call_ts"] = _last_call_ts(cached.get("recent"))
+            cached["_url"] = url
             results.append(cached)
         else:
             results.append({
-                "_source": name, "_error": None, "last_call_ts": "",
+                "_source": name, "_url": url, "_error": None, "last_call_ts": "",
                 "summary": {}, "by_project": [], "by_model": [], "daily": [], "gov": {}, "recent": [],
             })
     return results
