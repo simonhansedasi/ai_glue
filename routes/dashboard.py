@@ -63,9 +63,9 @@ def _daily():
         rows = conn.execute("""
             SELECT date(ts, '-7 hours') AS day, COUNT(*) AS calls, ROUND(SUM(cost_usd), 4) AS cost
             FROM llm_calls
+            WHERE ts >= datetime('now', '-21 days')
             GROUP BY date(ts, '-7 hours')
             ORDER BY day ASC
-            LIMIT 14
         """).fetchall()
     return [dict(r) for r in rows]
 
