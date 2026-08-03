@@ -16,6 +16,7 @@ import json
 import os
 import re
 import time
+from functools import lru_cache
 
 import requests
 from flask import Blueprint, Response, jsonify, request, stream_with_context
@@ -25,6 +26,18 @@ from src.logger import log_call
 
 
 bp = Blueprint("proxy", __name__)
+
+
+@lru_cache(maxsize=8)
+def _parse_body(body_bytes):
+    """Every proxied request is independently json.loads'd by 5 helpers below
+    (_detect_project, _detect_session, _get_model, _extract_prompt, _is_streaming).
+    For a long Claude Code conversation the body can be megabytes, so parsing it
+    5 times per turn instead of once is real, compounding latency. Cache it."""
+    try:
+        return json.loads(body_bytes)
+    except Exception:
+        return {}
 
 OPENAI_BASE = "https://api.openai.com"
 ANTHROPIC_BASE = "https://api.anthropic.com"
@@ -87,11 +100,15 @@ def _detect_project(body_bytes):
     """
     try:
         from collections import Counter
-        body = json.loads(body_bytes)
+        body = _parse_body(body_bytes)
 
-        # Primary signal: file paths in tool_use input blocks
+        # Primary signal: file paths in tool_use input blocks.
+        # ponytail: only the last 20 messages are scanned (not the whole growing
+        # history) since project never changes mid-session in practice; full
+        # rescan every turn was the O(n^2) cost per conversation. Widen the
+        # window if a session is ever seen switching projects mid-stream.
         counts = Counter()
-        for msg in body.get("messages", []):
+        for msg in body.get("messages", [])[-20:]:
             content = msg.get("content", "")
             if not isinstance(content, list):
                 continue
@@ -123,7 +140,7 @@ def _detect_project(body_bytes):
 def _detect_session(body_bytes):
     """Derive a stable session ID from the first message — same across all turns of a conversation."""
     try:
-        body = json.loads(body_bytes)
+        body = _parse_body(body_bytes)
         messages = body.get("messages", [])
         if messages:
             first = messages[0].get("content", "")
@@ -142,19 +159,27 @@ def _clean_response_headers(upstream_headers):
 
 
 def _extract_prompt(body_bytes, provider):
+    """Return only the newest message's text, not the whole growing conversation.
+
+    The Anthropic/OpenAI APIs resend full message history on every call, so joining
+    every message here re-stored (and re-hashed, and re-rendered on the dashboard)
+    the entire conversation-so-far on every single turn — O(n^2) work and DB bytes
+    over a session's lifetime for content that's already logged in earlier rows.
+    """
     try:
-        body = json.loads(body_bytes)
+        body = _parse_body(body_bytes)
         messages = body.get("messages", [])
-        parts = []
-        for m in messages:
-            content = m.get("content", "")
-            if isinstance(content, str):
-                parts.append(content)
-            elif isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        parts.append(block["text"])
-        return " | ".join(parts)
+        if not messages:
+            return ""
+        content = messages[-1].get("content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return " | ".join(
+                block["text"] for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        return ""
     except Exception:
         return ""
 
@@ -260,14 +285,14 @@ def _parse_anthropic_full(body_bytes):
 
 def _is_streaming(body_bytes):
     try:
-        return bool(json.loads(body_bytes).get("stream", False))
+        return bool(_parse_body(body_bytes).get("stream", False))
     except Exception:
         return False
 
 
 def _get_model(body_bytes):
     try:
-        return json.loads(body_bytes).get("model", "")
+        return _parse_body(body_bytes).get("model", "")
     except Exception:
         return ""
 

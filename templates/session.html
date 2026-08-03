@@ -87,7 +87,7 @@
 
   {% if c.raw_prompt %}
   <details class="turn-section"{% if c.gov_flags and c.gov_flags != '[]' %} open{% endif %}>
-    <summary class="turn-label" style="cursor:pointer;">Prompt (full history, {{ c.raw_prompt|length }} chars)</summary>
+    <summary class="turn-label" style="cursor:pointer;">Prompt ({{ c.raw_prompt|length }} chars)</summary>
     <pre class="turn-pre prompt-pre" style="margin-top:0.5rem;">{{ c.raw_prompt }}</pre>
   </details>
   {% endif %}

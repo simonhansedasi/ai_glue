@@ -40,4 +40,12 @@ def init_db():
             conn.execute("ALTER TABLE llm_calls ADD COLUMN reviewed_at TEXT")
         if "tool_calls" not in existing:
             conn.execute("ALTER TABLE llm_calls ADD COLUMN tool_calls TEXT")
+        # Dashboard queries filter/sort/group on these columns on every page load;
+        # without indexes each one was a full table scan. Indexes are on the small
+        # columns only, so lookups avoid touching the (much larger) raw_prompt/
+        # raw_response overflow pages entirely.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_ts ON llm_calls(ts)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_project ON llm_calls(project)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_session ON llm_calls(session_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_model ON llm_calls(model)")
         conn.commit()

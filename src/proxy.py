@@ -8,17 +8,19 @@ init_db()
 
 
 def _extract_prompt(kwargs: dict) -> str:
+    """Only the newest message, not the whole growing conversation — see routes/proxy.py."""
     messages = kwargs.get("messages", [])
-    parts = []
-    for m in messages:
-        content = m.get("content", "")
-        if isinstance(content, str):
-            parts.append(content)
-        elif isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    parts.append(block["text"])
-    return " | ".join(parts)
+    if not messages:
+        return ""
+    content = messages[-1].get("content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " | ".join(
+            block["text"] for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return ""
 
 
 class _MessagesProxy:

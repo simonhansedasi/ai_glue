@@ -40,7 +40,7 @@ def test_anthropic_call_is_logged():
         _mock_anthropic_response()
     )
     with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-        with patch("src.governance.check", return_value=[]):
+        with patch("src.proxy.check", return_value=[]):
             from src.proxy import GluedClient
             client = GluedClient("anthropic", session_id="s-test", project="p-test")
             client.messages.create(
@@ -65,7 +65,7 @@ def test_anthropic_call_is_logged():
 def test_openai_call_is_logged():
     with patch("openai.OpenAI") as mock_cls:
         mock_cls.return_value.chat.completions.create.return_value = _mock_openai_response()
-        with patch("src.governance.check", return_value=[]):
+        with patch("src.proxy.check", return_value=[]):
             from src.proxy import GluedClient
             client = GluedClient("openai", session_id="s-oai", project="p-oai")
             client.chat.completions.create(

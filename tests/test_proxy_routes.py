@@ -39,7 +39,7 @@ def _mock_upstream(status=200, body=None, headers=None):
 def test_openai_proxy_logs_call(client):
     upstream = _mock_upstream()
     with patch("requests.request", return_value=upstream):
-        with patch("src.governance.check", return_value=[]):
+        with patch("routes.proxy.check", return_value=[]):
             resp = client.post(
                 "/proxy/openai/v1/chat/completions",
                 data=json.dumps({
@@ -70,7 +70,7 @@ def test_openai_proxy_logs_call(client):
 
 
 def test_openai_proxy_governance_block(client):
-    with patch("src.governance.check", side_effect=ValueError("Model not allowed")):
+    with patch("routes.proxy.check", side_effect=ValueError("Model not allowed")):
         resp = client.post(
             "/proxy/openai/v1/chat/completions",
             data=json.dumps({"model": "gpt-3.5-turbo-instruct", "messages": []}),
@@ -84,7 +84,7 @@ def test_openai_proxy_governance_block(client):
 def test_openai_proxy_pii_flagged_but_allowed(client):
     upstream = _mock_upstream()
     with patch("requests.request", return_value=upstream):
-        with patch("src.governance.check", return_value=["pii:email"]):
+        with patch("routes.proxy.check", return_value=["pii:email"]):
             resp = client.post(
                 "/proxy/openai/v1/chat/completions",
                 data=json.dumps({
@@ -108,7 +108,7 @@ def test_openai_proxy_pii_flagged_but_allowed(client):
 def test_anthropic_proxy_logs_call(client):
     upstream = _mock_upstream(body=b'{"content":[{"text":"Hi"}],"usage":{"input_tokens":8,"output_tokens":3}}')
     with patch("requests.request", return_value=upstream):
-        with patch("src.governance.check", return_value=[]):
+        with patch("routes.proxy.check", return_value=[]):
             resp = client.post(
                 "/proxy/anthropic/v1/messages",
                 data=json.dumps({
@@ -140,7 +140,7 @@ def test_anthropic_proxy_logs_call(client):
 
 
 def test_anthropic_proxy_governance_block(client):
-    with patch("src.governance.check", side_effect=ValueError("Model not allowed")):
+    with patch("routes.proxy.check", side_effect=ValueError("Model not allowed")):
         resp = client.post(
             "/proxy/anthropic/v1/messages",
             data=json.dumps({"model": "some-banned-model", "messages": []}),
@@ -155,7 +155,7 @@ def test_anthropic_proxy_governance_block(client):
 def test_project_detected_from_tool_use(client):
     upstream = _mock_upstream(body=b'{"content":[{"text":"Hi"}],"usage":{"input_tokens":5,"output_tokens":2}}')
     with patch("requests.request", return_value=upstream):
-        with patch("src.governance.check", return_value=[]):
+        with patch("routes.proxy.check", return_value=[]):
             resp = client.post(
                 "/proxy/anthropic/v1/messages",
                 data=json.dumps({
@@ -198,7 +198,7 @@ def test_session_stable_within_conversation(client):
     ]
 
     with patch("requests.request", return_value=upstream):
-        with patch("src.governance.check", return_value=[]):
+        with patch("routes.proxy.check", return_value=[]):
             client.post(
                 "/proxy/anthropic/v1/messages",
                 data=json.dumps({
@@ -231,7 +231,7 @@ def test_session_stable_within_conversation(client):
 def test_header_takes_precedence_over_autodetect(client):
     upstream = _mock_upstream(body=b'{"content":[{"text":"Hi"}],"usage":{"input_tokens":5,"output_tokens":2}}')
     with patch("requests.request", return_value=upstream):
-        with patch("src.governance.check", return_value=[]):
+        with patch("routes.proxy.check", return_value=[]):
             resp = client.post(
                 "/proxy/anthropic/v1/messages",
                 data=json.dumps({
@@ -264,7 +264,7 @@ def test_anthropic_team_key_tags_project_and_swaps_key(client):
 
     os.environ["ANTHROPIC_API_KEY"] = "sk-ant-real-key"
     with patch("requests.request", mock_req):
-        with patch("src.governance.check", return_value=[]):
+        with patch("routes.proxy.check", return_value=[]):
             with patch("routes.proxy.get_teams", return_value={"sk-aiglue-eng": {"name": "engineering"}}):
                 resp = client.post(
                     "/proxy/anthropic/v1/messages",
@@ -299,7 +299,7 @@ def test_openai_team_key_tags_project_and_swaps_key(client):
 
     os.environ["OPENAI_API_KEY"] = "sk-openai-real-key"
     with patch("requests.request", mock_req):
-        with patch("src.governance.check", return_value=[]):
+        with patch("routes.proxy.check", return_value=[]):
             with patch("routes.proxy.get_teams", return_value={"sk-aiglue-marketing": {"name": "marketing"}}):
                 resp = client.post(
                     "/proxy/openai/v1/chat/completions",

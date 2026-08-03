@@ -275,7 +275,15 @@ def _last_call_ts(recent):
 
 
 def _fetch_child(name, url):
-    """Fetch a single child's /api/summary and update _child_cache. Called by background thread."""
+    """Fetch a single child's /api/summary and update _child_cache.
+
+    Called both by the background thread and, once per child, synchronously from
+    _gather_instances() on cold cache. On failure this MUST still write a
+    placeholder: _gather_instances() only does the blocking synchronous fetch
+    when `cached is None`, so an offline child that never gets cached here would
+    otherwise eat its full connect+read timeout on every single page load
+    forever, not just the first one after a restart.
+    """
     try:
         r = http.get(f"{url}/api/summary", timeout=10)
         r.raise_for_status()
@@ -287,7 +295,12 @@ def _fetch_child(name, url):
         with _cache_lock:
             _child_cache[name] = data
     except Exception:
-        pass
+        with _cache_lock:
+            _child_cache.setdefault(name, {
+                "_source": name, "_error": "unreachable",
+                "summary": {}, "by_project": [], "by_model": [],
+                "daily": [], "gov": {}, "recent": [],
+            })
 
 
 def _gather_instances():
