@@ -244,8 +244,17 @@ def mark_reviewed():
         """)
         conn.commit()
     children = _load_config().get("aggregator", {}).get("children", [])
+    own_name = os.getenv("AIGLUE_INSTANCE_NAME")
     for child in children:
         name = child.get("name", "unknown")
+        # ponytail: a child entry naming this same instance (copy-paste onto a
+        # leaf instance, e.g. governance.yaml meant only for the Pi aggregator
+        # got duplicated onto a child) makes this fan out to itself, which
+        # fans out to itself again, forever. Skip it rather than trust every
+        # instance's config to never list itself. Found 2026-09-27: DO's
+        # governance.yaml had exactly this, self-looping non-stop.
+        if own_name and name == own_name:
+            continue
         url = child.get("url", "").rstrip("/")
         try:
             http.post(f"{url}/flags/mark-reviewed", timeout=5)
