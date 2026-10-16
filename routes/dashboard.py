@@ -9,6 +9,12 @@ from datetime import datetime, timezone, timedelta
 PDT = timezone(timedelta(hours=-7))
 
 import requests as http
+
+
+def _child_auth():
+    """Credentials for calls to child instances (same shared AIGLUE_TOKEN), or None if auth is off."""
+    token = os.getenv("AIGLUE_TOKEN")
+    return ("aiglue", token) if token else None
 from flask import Blueprint, render_template, jsonify, Response, request
 from src.store import get_conn
 from src.governance import _load_config
@@ -28,7 +34,7 @@ def _refresh_children():
             name = child.get("name", "unknown")
             url = child.get("url", "").rstrip("/")
             try:
-                r = http.get(f"{url}/api/summary", timeout=10)
+                r = http.get(f"{url}/api/summary", timeout=10, auth=_child_auth())
                 r.raise_for_status()
                 data = r.json()
                 data["_source"] = name
@@ -90,6 +96,65 @@ def _governance_summary():
                 COALESCE(SUM(CASE WHEN error LIKE '%governance%' AND reviewed_at IS NULL THEN 1 ELSE 0 END), 0) AS blocked_calls
             FROM llm_calls
         """).fetchone())
+
+
+EVAL_SESSIONS = ("eval",)  # traffic from eval/gate runs; excluded from production agent health
+
+
+def _agent_stats():
+    """Production traffic per (project, agent, parent_agent, config_hash) for the staging pages. Eval-session calls
+    are excluded. Included in /api/summary so the aggregator can merge it from child instances."""
+    marks = ",".join("?" for _ in EVAL_SESSIONS)
+    with get_conn() as conn:
+        rows = conn.execute(f"""
+            SELECT project,
+                   COALESCE(agent, '(unlabelled)') AS agent,
+                   COALESCE(parent_agent, '') AS parent_agent,
+                   COALESCE(config_hash, '') AS config_hash,
+                   COUNT(*) AS calls,
+                   SUM(error IS NOT NULL) AS errors,
+                   ROUND(SUM(cost_usd), 4) AS cost_usd,
+                   ROUND(AVG(latency_ms)) AS avg_latency_ms,
+                   MIN(ts) AS first_ts, MAX(ts) AS last_ts,
+                   SUM(ts >= datetime('now', '-7 days')) AS calls_7d,
+                   SUM(ts >= datetime('now', '-7 days') AND error IS NOT NULL) AS errors_7d
+            FROM llm_calls
+            WHERE session_id NOT IN ({marks})
+            GROUP BY 1, 2, 3, 4
+        """, EVAL_SESSIONS).fetchall()
+    return [dict(r) for r in rows]
+
+
+TOOL_MIX_SCAN_LIMIT = 50000  # newest rows scanned per instance; keeps the staging pages cheap on a big DB
+
+
+def _tool_mix():
+    """Tool-call mix per (project, agent, config_hash, kind), kind = 'prod' (last 7 days) or 'eval'.
+
+    Only rows that carry a config_hash are counted: those were logged by proxy code that records tool calls, so a
+    NULL tool_calls there really means 'text-only answer'. Older rows have NULL tool_calls even when tools were used.
+    A call with no tool counts as '(no tool)'; otherwise every tool_use block counts once.
+    """
+    marks = ",".join("?" for _ in EVAL_SESSIONS)
+    with get_conn() as conn:
+        rows = conn.execute(f"""
+            SELECT project, agent, config_hash, tool_calls, session_id IN ({marks}) AS is_eval
+            FROM llm_calls
+            WHERE config_hash IS NOT NULL AND agent IS NOT NULL
+              AND (session_id IN ({marks}) OR ts >= datetime('now', '-7 days'))
+            ORDER BY id DESC LIMIT ?""", EVAL_SESSIONS + EVAL_SESSIONS + (TOOL_MIX_SCAN_LIMIT,)).fetchall()
+    mix = {}
+    for r in rows:
+        key = (r["project"], r["agent"], r["config_hash"], "eval" if r["is_eval"] else "prod")
+        m = mix.setdefault(key, {"calls": 0, "counts": {}})
+        m["calls"] += 1
+        try:
+            names = [t["name"] for t in json.loads(r["tool_calls"])] if r["tool_calls"] else []
+        except (ValueError, KeyError, TypeError):
+            names = []
+        for n in (names or ["(no tool)"]):
+            m["counts"][n] = m["counts"].get(n, 0) + 1
+    return [{"project": k[0], "agent": k[1], "config_hash": k[2], "kind": k[3], **v} for k, v in mix.items()]
 
 
 def _by_project():
@@ -257,7 +322,7 @@ def mark_reviewed():
             continue
         url = child.get("url", "").rstrip("/")
         try:
-            http.post(f"{url}/flags/mark-reviewed", timeout=5)
+            http.post(f"{url}/flags/mark-reviewed", timeout=5, auth=_child_auth())
         except Exception:
             pass
         with _cache_lock:
@@ -294,7 +359,7 @@ def _fetch_child(name, url):
     forever, not just the first one after a restart.
     """
     try:
-        r = http.get(f"{url}/api/summary", timeout=10)
+        r = http.get(f"{url}/api/summary", timeout=10, auth=_child_auth())
         r.raise_for_status()
         data = r.json()
         data["_source"] = name
@@ -328,6 +393,8 @@ def _gather_instances():
         "daily": _daily(),
         "gov": _governance_summary(),
         "recent": local_recent,
+        "agent_stats": _agent_stats(),
+        "tool_mix": _tool_mix(),
     }
     local_result["last_call_ts"] = _last_call_ts(local_recent)
     results = [local_result]
@@ -509,6 +576,8 @@ def summary_api():
         "daily": _daily(),
         "gov": _governance_summary(),
         "recent": _recent(limit=500),
+        "agent_stats": _agent_stats(),
+        "tool_mix": _tool_mix(),
     })
 
 

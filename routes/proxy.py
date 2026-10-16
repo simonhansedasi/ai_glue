@@ -43,8 +43,15 @@ OPENAI_BASE = "https://api.openai.com"
 ANTHROPIC_BASE = "https://api.anthropic.com"
 
 _STRIP = {"host", "content-length", "transfer-encoding", "connection",
-          "x-aiglue-session", "x-aiglue-project"}
+          "x-aiglue-session", "x-aiglue-project", "x-aiglue-agent", "x-aiglue-parent-agent", "x-aiglue-config-hash"}
 _STRIP_RESPONSE = {"transfer-encoding", "content-encoding", "content-length"}
+
+
+def _agent_labels():
+    """Optional X-Aiglue-Agent / X-Aiglue-Parent-Agent headers -> log_call kwargs. Parent = the agent whose run
+    caused this call (a subagent call carries both). Unlabelled calls leave both NULL."""
+    return {"agent": request.headers.get("X-Aiglue-Agent"),
+            "parent_agent": request.headers.get("X-Aiglue-Parent-Agent")}
 
 
 def _fwd_headers(incoming):
@@ -276,11 +283,55 @@ def _parse_anthropic_stream(chunks):
 def _parse_anthropic_full(body_bytes):
     try:
         obj = json.loads(body_bytes)
-        text = (obj.get("content") or [{}])[0].get("text", "")
+        blocks = obj.get("content") or []
+        text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+        tool_calls = [{"name": b.get("name", ""), "input": _trim_tool_input(b.get("input", {}))}
+                      for b in blocks if b.get("type") == "tool_use"]
         usage = obj.get("usage", {})
-        return text, usage.get("input_tokens", 0), usage.get("output_tokens", 0)
+        return text, usage.get("input_tokens", 0), usage.get("output_tokens", 0), tool_calls
     except Exception:
-        return "", 0, 0
+        return "", 0, 0, []
+
+
+def _config_hash(body_bytes):
+    """Fingerprint of the agent's configuration (system prompt + tool definitions), so a
+    behavior change can be tied to the prompt/tools version that produced it.
+
+    An agent whose system prompt embeds live data (file lists, dates) would get a new hash on every call, so it may
+    declare its own with X-Aiglue-Config-Hash (computed from its static prompt + tools + model); that wins."""
+    declared = (request.headers.get("X-Aiglue-Config-Hash") or "").strip()
+    if declared:
+        return declared[:64]
+    try:
+        body = _parse_body(body_bytes)
+        cfg = {"system": body.get("system"), "tools": body.get("tools")}
+        if cfg["system"] is None and cfg["tools"] is None:
+            return None
+        return hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()[:16]
+    except Exception:
+        return None
+
+
+def _cache_usage_full(body_bytes):
+    """(cache_read_tokens, cache_write_tokens) from a non-streaming Anthropic response body."""
+    try:
+        u = json.loads(body_bytes).get("usage") or {}
+        return u.get("cache_read_input_tokens") or 0, u.get("cache_creation_input_tokens") or 0
+    except Exception:
+        return 0, 0
+
+
+def _cache_usage_stream(chunks):
+    """Same, from a streamed response: the numbers are in the message_start event's usage."""
+    for chunk in chunks:
+        for line in chunk.decode("utf-8", errors="ignore").splitlines():
+            if line.startswith("data:") and '"message_start"' in line:
+                try:
+                    u = json.loads(line[5:].strip()).get("message", {}).get("usage", {})
+                    return u.get("cache_read_input_tokens") or 0, u.get("cache_creation_input_tokens") or 0
+                except Exception:
+                    return 0, 0
+    return 0, 0
 
 
 def _is_streaming(body_bytes):
@@ -313,6 +364,7 @@ def proxy_openai(path):
                   or os.getenv("AIGLUE_DEFAULT_SESSION", "proxy"))
 
     model = _get_model(body_bytes)
+    labels = _agent_labels()
     prompt = _extract_prompt(body_bytes, "openai")
     streaming = _is_streaming(body_bytes)
 
@@ -340,7 +392,7 @@ def proxy_openai(path):
     except Exception as e:
         latency_ms = int((time.time() - t0) * 1000)
         log_call("openai", model, session_id, project, 0, 0, latency_ms,
-                 prompt, "", gov_flags, error=str(e))
+                 prompt, "", gov_flags, error=str(e), **labels)
         return jsonify({"error": str(e)}), 502
 
     if streaming:
@@ -353,7 +405,7 @@ def proxy_openai(path):
             latency_ms = int((time.time() - t0) * 1000)
             text, inp, out = _parse_openai_stream(chunks)
             log_call("openai", model, session_id, project, inp, out,
-                     latency_ms, prompt, text, gov_flags)
+                     latency_ms, prompt, text, gov_flags, **labels)
 
         return Response(
             stream_with_context(generate()),
@@ -366,7 +418,7 @@ def proxy_openai(path):
     text, inp, out = _parse_openai_full(body)
     error = body.decode("utf-8", errors="ignore")[:500] if upstream.status_code >= 400 else None
     log_call("openai", model, session_id, project, inp, out,
-             latency_ms, prompt, text, gov_flags, error=error)
+             latency_ms, prompt, text, gov_flags, error=error, **labels)
 
     return Response(body, status=upstream.status_code,
                     content_type=upstream.headers.get("content-type", "application/json"))
@@ -388,7 +440,9 @@ def proxy_anthropic(path):
                   or os.getenv("AIGLUE_DEFAULT_SESSION", "proxy"))
 
     model = _get_model(body_bytes)
+    labels = _agent_labels()
     prompt = _extract_prompt(body_bytes, "anthropic")
+    config_hash = _config_hash(body_bytes)
     streaming = _is_streaming(body_bytes)
 
     try:
@@ -415,7 +469,7 @@ def proxy_anthropic(path):
     except Exception as e:
         latency_ms = int((time.time() - t0) * 1000)
         log_call("anthropic", model, session_id, project, 0, 0, latency_ms,
-                 prompt, "", gov_flags, error=str(e))
+                 prompt, "", gov_flags, error=str(e), config_hash=config_hash, **labels)
         return jsonify({"error": str(e)}), 502
 
     if streaming:
@@ -427,8 +481,10 @@ def proxy_anthropic(path):
                 yield chunk
             latency_ms = int((time.time() - t0) * 1000)
             text, inp, out, tool_calls = _parse_anthropic_stream(chunks)
+            cache_read, cache_write = _cache_usage_stream(chunks)
             log_call("anthropic", model, session_id, project, inp, out,
-                     latency_ms, prompt, text, gov_flags, tool_calls=tool_calls)
+                     latency_ms, prompt, text, gov_flags, tool_calls=tool_calls,
+                     config_hash=config_hash, cache_read_tokens=cache_read, cache_write_tokens=cache_write, **labels)
 
         return Response(
             stream_with_context(generate()),
@@ -438,10 +494,13 @@ def proxy_anthropic(path):
 
     latency_ms = int((time.time() - t0) * 1000)
     body = upstream.content
-    text, inp, out = _parse_anthropic_full(body)
+    text, inp, out, tool_calls = _parse_anthropic_full(body)
     error = body.decode("utf-8", errors="ignore")[:500] if upstream.status_code >= 400 else None
+    cache_read, cache_write = _cache_usage_full(body)
     log_call("anthropic", model, session_id, project, inp, out,
-             latency_ms, prompt, text, gov_flags, error=error)
+             latency_ms, prompt, text, gov_flags, error=error,
+             tool_calls=tool_calls, config_hash=config_hash,
+             cache_read_tokens=cache_read, cache_write_tokens=cache_write, **labels)
 
     return Response(body, status=upstream.status_code,
                     content_type=upstream.headers.get("content-type", "application/json"))

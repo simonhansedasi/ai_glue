@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_staging_macros.html" import badge, tree_rows %}
+{% block title %}{{ project.name }} staging{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="muted"><a href="{{ url_for('staging.home') }}">Staging</a> /</div>
+  <h1>{{ project.name }} {{ badge(project.status) }}</h1>
+  <div class="subtitle">{{ project.n_agents }} agents, {{ project.calls_7d }} calls and {{ project.errors_7d }} errors in the last 7 days (UTC).</div>
+</div>
+<div class="section">
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Agent</th><th>Status</th><th>Roll-up</th><th>Calls 7d</th><th>Errors 7d</th><th>Last call (UTC)</th><th>Why</th></tr></thead>
+    <tbody>{{ tree_rows(project.tree, project, amap) }}</tbody>
+  </table>
+  </div>
+  <p class="muted">Subagents are indented under the agent whose run called them; an agent called both directly and by another agent appears in both places.</p>
+  {% if project.unlabelled.calls %}
+  <p class="muted">{{ project.unlabelled.calls }} calls ({{ project.unlabelled.calls_7d }} in the last 7 days) carry no agent label and are not assessed.</p>
+  {% endif %}
+</div>
+<div class="section legend">
+  <h3>Status rules</h3>
+  <ul>
+    <li>{{ badge("RED") }} latest gate run BLOCK or INVALID; production error rate over 5% for 7 days (20+ calls); or evals exist but no baseline.</li>
+    <li>{{ badge("AMBER") }} production runs a config with no baseline or gate PASS on record; the last eval is over 14 days old; or the production tool-call mix differs from staging.</li>
+    <li>{{ badge("GREEN") }} none of the above.</li>
+    <li>{{ badge("UNTESTED") }} no eval runs for this agent. A parent's roll-up is the worst of itself and its subagents.</li>
+  </ul>
+</div>
+{% endblock %}

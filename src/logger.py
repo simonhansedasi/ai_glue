@@ -42,8 +42,13 @@ def log_call(
     gov_flags: list,
     error: str = None,
     tool_calls: list = None,
+    config_hash: str = None,
+    agent: str = None,
+    parent_agent: str = None,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
 ):
-    cost = estimate_cost(model, input_tokens, output_tokens)
+    cost = estimate_cost(model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
     prompt_hash = _hash(raw_prompt)
     if REDACT_PII:
         raw_prompt = _redact(raw_prompt)
@@ -52,8 +57,9 @@ def log_call(
         conn.execute("""
             INSERT INTO llm_calls
                 (provider, model, session_id, project, input_tokens, output_tokens,
-                 cost_usd, latency_ms, prompt_hash, raw_prompt, raw_response, gov_flags, error, tool_calls)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 cost_usd, latency_ms, prompt_hash, raw_prompt, raw_response, gov_flags, error, tool_calls, config_hash, agent, parent_agent,
+                 cache_read_tokens, cache_write_tokens)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             provider, model, session_id, project,
             input_tokens, output_tokens, cost, latency_ms,
@@ -63,5 +69,10 @@ def log_call(
             json.dumps(gov_flags),
             error,
             json.dumps(tool_calls) if tool_calls else None,
+            config_hash,
+            agent,
+            parent_agent,
+            cache_read_tokens or 0,
+            cache_write_tokens or 0,
         ))
         conn.commit()

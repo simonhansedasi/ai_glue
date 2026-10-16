@@ -1,0 +1,19 @@
+{% macro badge(s) %}<span class="status {{ s|lower }}">{{ s }}</span>{% endmacro %}
+
+{% macro tree_rows(nodes, project, amap) %}
+{% for n in nodes %}
+{% set a = amap[n.name] %}
+<tr>
+  <td class="agent-cell" style="padding-left: {{ 0.75 + n.depth * 1.5 }}rem">
+    {% if n.depth %}<span class="muted">&#8627;</span> {% endif %}<a href="{{ url_for('staging.agent_page', project=project.name, agent=n.name) }}">{{ n.name }}</a>
+  </td>
+  <td>{{ badge(n.status) }}</td>
+  <td>{% if n.rollup != n.status %}{{ badge(n.rollup) }} <span class="muted">via subagent</span>{% else %}<span class="muted">&mdash;</span>{% endif %}</td>
+  <td>{{ a.calls_7d }}</td>
+  <td>{{ a.errors_7d }}</td>
+  <td class="mono">{{ a.last_ts or "&mdash;"|safe }}</td>
+  <td class="why">{{ a.reasons[0] if a.reasons else "" }}</td>
+</tr>
+{{ tree_rows(n.children, project, amap) }}
+{% endfor %}
+{% endmacro %}

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% from "_staging_macros.html" import badge %}
+{% block title %}{{ agent.name }} staging{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="muted"><a href="{{ url_for('staging.home') }}">Staging</a> / <a href="{{ url_for('staging.project_page', project=project.name) }}">{{ project.name }}</a> /</div>
+  <h1>{{ agent.name }} {{ badge(agent.status) }}{% if agent.rollup != agent.status %} <span class="muted">roll-up</span> {{ badge(agent.rollup) }}{% endif %}</h1>
+  <div class="subtitle">
+    {% if agent.parents %}Called by {% for p in agent.parents %}<a href="{{ url_for('staging.agent_page', project=project.name, agent=p) }}">{{ p }}</a>{{ ", " if not loop.last }}{% endfor %}. {% endif %}
+    {% if agent.children %}Calls subagents {% for c in agent.children %}<a href="{{ url_for('staging.agent_page', project=project.name, agent=c) }}">{{ c }}</a>{{ ", " if not loop.last }}{% endfor %}.{% endif %}
+  </div>
+</div>
+
+{% if agent.reasons %}
+<div class="section"><h3>Why this status</h3><ul>{% for r in agent.reasons %}<li>{{ r }}</li>{% endfor %}</ul></div>
+{% endif %}
+
+<div class="cards">
+  <div class="card"><div class="label">Calls (all time)</div><div class="value">{{ agent.calls }}</div></div>
+  <div class="card"><div class="label">Calls / errors, 7 days</div><div class="value">{{ agent.calls_7d }} / {{ agent.errors_7d }}</div></div>
+  <div class="card"><div class="label">Cost (production)</div><div class="value">${{ "%.2f"|format(agent.cost_usd) }}</div></div>
+  <div class="card"><div class="label">Last call (UTC)</div><div class="value mono">{{ agent.last_ts or "none" }}</div></div>
+</div>
+
+<div class="section">
+  <h3>Versions seen in production (by config hash)</h3>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Config hash</th><th>Live</th><th>Vetted</th><th>Calls</th><th>Errors</th><th>Calls 7d</th><th>First (UTC)</th><th>Last (UTC)</th></tr></thead>
+    <tbody>
+    {% for v in agent.versions %}
+      <tr><td class="mono">{{ v.config_hash }}</td>
+          <td>{{ "yes" if v.live else "no" }}</td>
+          <td>{% if v.vetted %}<span class="status green">baseline / gate PASS</span>{% else %}<span class="status amber">no baseline or PASS</span>{% endif %}</td>
+          <td>{{ v.calls }}</td><td>{{ v.errors }}</td><td>{{ v.calls_7d }}</td>
+          <td class="mono">{{ v.first_ts }}</td><td class="mono">{{ v.last_ts }}</td></tr>
+    {% else %}
+      <tr><td colspan="8" class="empty">No production calls with a config hash yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+{% if agent.drift %}
+<div class="section">
+  <h3>Behaviour drift: production vs staging tool mix</h3>
+  <p class="muted">Production = calls in the last 7 days; staging = all eval runs of the same config. Eval cases are scripted, so some difference is normal; the signal is a large distance (limit {{ drift_limit }}) or one that grows over time. Needs {{ min_calls }}+ calls on each side to judge.</p>
+  {% for d in agent.drift %}
+  <h4><span class="mono">{{ d.config_hash }}</span>
+    {% if d.verdict == "drift" %}<span class="status amber">DIFFERS</span> distance {{ "%.2f"|format(d.tvd) }}
+    {% elif d.verdict == "ok" %}<span class="status green">WITHIN LIMIT</span> distance {{ "%.2f"|format(d.tvd) }}
+    {% elif d.verdict == "insufficient" %}<span class="status untested">NOT ENOUGH CALLS</span> <span class="muted">production {{ d.prod_n }}, staging {{ d.eval_n }}</span>
+    {% else %}<span class="status untested">NO STAGING TRAFFIC</span> <span class="muted">no eval calls recorded for this config to compare against</span>{% endif %}
+  </h4>
+  {% if d.rows %}
+  <div class="table-scroll"><table>
+    <thead><tr><th>Tool</th><th>Production</th><th>Staging</th></tr></thead>
+    <tbody>{% for r in d.rows %}<tr><td class="mono">{{ r.tool }}</td><td>{{ "%.0f"|format(r.prod * 100) }}%</td><td>{{ "%.0f"|format(r.staging * 100) }}%</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="section">
+  <h3>Eval history</h3>
+  <div class="table-scroll"><table>
+    <thead><tr><th>When (UTC)</th><th>Kind</th><th>Decision</th><th>Pass rate</th><th>Runs</th><th>Config hash</th><th>Report</th></tr></thead>
+    <tbody>
+    {% for e in agent.evals %}
+      <tr><td class="mono">{{ e.ts }}</td><td>{{ e.kind }}</td>
+          <td>{% if e.decision == "PASS" %}<span class="status green">PASS</span>{% elif e.decision %}<span class="status red">{{ e.decision }}</span>{% else %}<span class="muted">&mdash;</span>{% endif %}</td>
+          <td>{{ "%.1f"|format(e.overall * 100) }}%</td><td>{{ e.n_runs }}</td><td class="mono">{{ e.config_hash }}</td>
+          <td>{% if e.has_report %}<a href="{{ url_for('evals.get_eval_report', run_id=e.run_id) }}">open</a>{% else %}<span class="muted">&mdash;</span>{% endif %}</td></tr>
+    {% else %}
+      <tr><td colspan="7" class="empty">No eval runs recorded for this agent.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

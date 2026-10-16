@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "_staging_macros.html" import badge %}
+{% block title %}Staging{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Agent staging</h1>
+  <div class="subtitle">Health of each project's agents and subagents. Worst status wins; UNTESTED means no evals recorded yet.</div>
+</div>
+{% if not projects %}
+  <p class="empty">No labelled agents or eval runs yet. Agents appear once they send <span class="mono">X-Aiglue-Agent</span> or a gate run is posted.</p>
+{% else %}
+<div class="cards">
+  {% for p in projects %}
+  <a class="card tile {{ p.status|lower }}" href="{{ url_for('staging.project_page', project=p.name) }}">
+    <div class="label">project</div>
+    <div class="value">{{ p.name }}</div>
+    <div class="tile-status">{{ badge(p.status) }}</div>
+    <div class="muted">{{ p.n_agents }} agent{{ "" if p.n_agents == 1 else "s" }}{% if p.n_untested %}, {{ p.n_untested }} untested{% endif %}</div>
+    <div class="muted">{{ p.calls_7d }} calls / {{ p.errors_7d }} errors, 7 days</div>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

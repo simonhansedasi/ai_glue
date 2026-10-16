@@ -213,3 +213,26 @@ code {
   margin-top: 0.25rem;
 }
 .export-btn:hover { background: rgba(37,99,235,0.22); }
+
+/* Staging */
+.status { display: inline-block; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; padding: 0.15rem 0.5rem; border-radius: 4px; }
+.status.green    { background: rgba(16,185,129,0.2); color: var(--green); }
+.status.amber    { background: rgba(245,158,11,0.2); color: var(--yellow); }
+.status.red      { background: rgba(239,68,68,0.2);  color: var(--red); }
+.status.untested { background: rgba(156,163,175,0.2); color: var(--muted); }
+a.tile { display: block; text-decoration: none; color: var(--text); border-left: 4px solid var(--border); }
+a.tile:hover { border-color: var(--blue); }
+a.tile.green { border-left-color: var(--green); }
+a.tile.amber { border-left-color: var(--yellow); }
+a.tile.red { border-left-color: var(--red); }
+.tile-status { margin: 0.5rem 0; }
+.muted { color: var(--muted); }
+td.why { white-space: normal; color: var(--muted); font-size: 0.8rem; min-width: 14rem; }
+.legend ul { list-style: none; padding: 0; }
+.legend li { margin: 0.35rem 0; color: var(--muted); }
+.page-header a, .section a { color: #60a5fa; text-decoration: none; }
+.page-header a:hover, .section a:hover { text-decoration: underline; }
+td.agent-cell { white-space: nowrap; }
+.section > .muted { margin-top: 0.75rem; }
+.card .value.mono { font-size: 1rem; }
+.section h4 { margin: 1.25rem 0 0.5rem; font-size: 0.95rem; }

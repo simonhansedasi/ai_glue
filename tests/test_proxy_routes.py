@@ -429,3 +429,113 @@ def test_training_export_excludes_flagged(client):
     resp = client.get("/export/training?project=flagged-proj&exclude_flagged=true")
     assert resp.status_code == 200
     assert resp.data.decode().strip() == ""
+
+
+# ── agent observability: tool calls + config fingerprint ──────────────────────
+
+_TOOLS = [{"name": "revise_proposals", "description": "d", "input_schema": {"type": "object"}}]
+
+
+def _post_anthropic(client, session, system, upstream_body):
+    upstream = _mock_upstream(body=upstream_body)
+    with patch("requests.request", return_value=upstream):
+        with patch("routes.proxy.check", return_value=[]):
+            client.post(
+                "/proxy/anthropic/v1/messages",
+                data=json.dumps({
+                    "model": "claude-haiku-4-5-20251001", "max_tokens": 100,
+                    "system": system, "tools": _TOOLS,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }),
+                headers={"Content-Type": "application/json", "x-api-key": "k",
+                         "X-Aiglue-Session": session, "X-Aiglue-Project": "obs-test"},
+            )
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM llm_calls WHERE session_id=? ORDER BY id DESC LIMIT 1", (session,)).fetchone()
+
+
+def test_nonstreaming_tool_use_is_logged(client):
+    body = (b'{"content":[{"type":"text","text":"Fixing."},'
+            b'{"type":"tool_use","id":"t1","name":"revise_proposals","input":{"remove_indices":[2]}}],'
+            b'"usage":{"input_tokens":5,"output_tokens":4}}')
+    row = _post_anthropic(client, "obs-tool", "sys A", body)
+    assert json.loads(row["tool_calls"]) == [{"name": "revise_proposals", "input": {"remove_indices": [2]}}]
+    assert row["raw_response"] == "Fixing."
+
+
+def test_config_hash_tracks_system_prompt_and_tools(client):
+    plain = b'{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}'
+    a1 = _post_anthropic(client, "obs-a1", "prompt A", plain)["config_hash"]
+    a2 = _post_anthropic(client, "obs-a2", "prompt A", plain)["config_hash"]
+    b = _post_anthropic(client, "obs-b", "prompt B", plain)["config_hash"]
+    assert a1 and a1 == a2 and a1 != b
+
+
+def test_no_system_or_tools_means_no_config_hash(client):
+    upstream = _mock_upstream(body=b'{"content":[{"type":"text","text":"ok"}],"usage":{}}')
+    with patch("requests.request", return_value=upstream):
+        with patch("routes.proxy.check", return_value=[]):
+            client.post("/proxy/anthropic/v1/messages",
+                        data=json.dumps({"model": "claude-haiku-4-5-20251001", "max_tokens": 10,
+                                         "messages": [{"role": "user", "content": "bare"}]}),
+                        headers={"Content-Type": "application/json", "x-api-key": "k",
+                                 "X-Aiglue-Session": "obs-bare", "X-Aiglue-Project": "obs-test"})
+    with get_conn() as conn:
+        row = conn.execute("SELECT config_hash FROM llm_calls WHERE session_id='obs-bare'").fetchone()
+    assert row["config_hash"] is None
+
+
+# ── agent / parent_agent labels ───────────────────────────────────────────────
+
+def _post_labelled(client, session, extra_headers):
+    upstream = _mock_upstream(body=b'{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}')
+    headers = {"Content-Type": "application/json", "x-api-key": "k", "X-Aiglue-Session": session,
+               "X-Aiglue-Project": "label-test", **extra_headers}
+    with patch("requests.request", return_value=upstream) as req:
+        with patch("routes.proxy.check", return_value=[]):
+            client.post("/proxy/anthropic/v1/messages",
+                        data=json.dumps({"model": "claude-haiku-4-5-20251001", "max_tokens": 5,
+                                         "messages": [{"role": "user", "content": "hi"}]}), headers=headers)
+    with get_conn() as conn:
+        row = conn.execute("SELECT agent, parent_agent FROM llm_calls WHERE session_id=?", (session,)).fetchone()
+    return row, req.call_args[1]["headers"]
+
+
+def test_agent_and_parent_labels_are_stored_and_not_forwarded(client):
+    row, fwd = _post_labelled(client, "lbl-1", {"X-Aiglue-Agent": "propose_log_entries", "X-Aiglue-Parent-Agent": "chat_copilot"})
+    assert (row["agent"], row["parent_agent"]) == ("propose_log_entries", "chat_copilot")
+    assert not any(k.lower().startswith("x-aiglue") for k in fwd)
+
+
+def test_unlabelled_call_has_null_agent(client):
+    row, _ = _post_labelled(client, "lbl-2", {})
+    assert row["agent"] is None and row["parent_agent"] is None
+
+
+# ── agent-declared config hash ────────────────────────────────────────────────
+
+def _post_with_system(client, session, system, extra_headers):
+    upstream = _mock_upstream(body=b'{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}')
+    headers = {"Content-Type": "application/json", "x-api-key": "k", "X-Aiglue-Session": session,
+               "X-Aiglue-Project": "cfg-test", **extra_headers}
+    with patch("requests.request", return_value=upstream) as req:
+        with patch("routes.proxy.check", return_value=[]):
+            client.post("/proxy/anthropic/v1/messages",
+                        data=json.dumps({"model": "claude-haiku-4-5-20251001", "max_tokens": 5, "system": system,
+                                         "messages": [{"role": "user", "content": "hi"}]}), headers=headers)
+    with get_conn() as conn:
+        row = conn.execute("SELECT config_hash FROM llm_calls WHERE session_id=?", (session,)).fetchone()
+    return row["config_hash"], req.call_args[1]["headers"]
+
+
+def test_declared_config_hash_wins_over_a_changing_system_prompt_and_is_not_forwarded(client):
+    h1, fwd = _post_with_system(client, "cfg-1", "files: a.md", {"X-Aiglue-Config-Hash": "declared123"})
+    h2, _ = _post_with_system(client, "cfg-2", "files: a.md, b.md", {"X-Aiglue-Config-Hash": "declared123"})
+    assert h1 == h2 == "declared123"
+    assert not any(k.lower() == "x-aiglue-config-hash" for k in fwd)
+
+
+def test_without_a_declared_hash_the_body_is_hashed_so_a_changing_prompt_changes_it(client):
+    h1, _ = _post_with_system(client, "cfg-3", "files: a.md", {})
+    h2, _ = _post_with_system(client, "cfg-4", "files: a.md, b.md", {})
+    assert h1 and h2 and h1 != h2
