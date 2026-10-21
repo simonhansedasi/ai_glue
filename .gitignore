@@ -46,3 +46,7 @@ why-physics-works-notes.md
 *.tiff
 *.ico
 .aiglue_token
+
+# Local + Pi only
+TODO.md
+training_turn.jsonl
